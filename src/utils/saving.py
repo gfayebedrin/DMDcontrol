@@ -1,6 +1,15 @@
 import h5py
 import numpy.typing as npt
-from .geometry import DeviceCalibration
+from .calibration import DeviceCalibration
+from dataclasses import asdict
+
+
+# Constants for HDF5 dataset names
+SEQUENCE = "sequence"
+TIMINGS = "timings"
+PATTERNS = "patterns"
+PATTERN = "pattern_{}"
+POLYGON = "polygon_{}"
 
 
 def save_pattern_sequence(
@@ -18,7 +27,16 @@ def save_pattern_sequence(
     - sequence: (M,) array_like, sequence of pattern indices.
     - timings: (M,) array_like, timing information for each sequence entry in milliseconds.
     """
-    raise NotImplementedError
+    with h5py.File(filepath, "w") as f:
+        f.create_dataset(SEQUENCE, data=sequence)
+        f.create_dataset(TIMINGS, data=timings)
+        f.create_group(PATTERNS, track_order=True)
+        for i, pattern in enumerate(patterns):
+            pattern_group = f[PATTERNS].create_group(
+                PATTERN.format(i), track_order=True
+            )
+            for j, polygon in enumerate(pattern):
+                pattern_group.create_dataset(POLYGON.format(j), data=polygon)
 
 
 def load_pattern_sequence(
@@ -35,7 +53,18 @@ def load_pattern_sequence(
     - sequence: (M,) array_like, sequence of pattern indices.
     - timings: (M,) array_like, timing information for each sequence entry in milliseconds.
     """
-    raise NotImplementedError
+    with h5py.File(filepath, "r") as f:
+        sequence = f[SEQUENCE][()]
+        timings = f[TIMINGS][()]
+        patterns = []
+        for pattern_name in f[PATTERNS]:
+            pattern_group = f[PATTERNS][pattern_name]
+            pattern = []
+            for polygon_name in pattern_group:
+                polygon = pattern_group[polygon_name][()]
+                pattern.append(polygon)
+            patterns.append(pattern)
+    return patterns, sequence, timings
 
 
 def save_calibration(filepath: str, calibration: DeviceCalibration):
@@ -46,7 +75,9 @@ def save_calibration(filepath: str, calibration: DeviceCalibration):
     - filepath: str, path to the HDF5 file.
     - calibration: Calibration, the calibration object to save.
     """
-    raise NotImplementedError
+    with h5py.File(filepath, "w") as f:
+        for key, value in asdict(calibration).items():
+            f.create_dataset(key, data=value)
 
 
 def load_calibration(filepath: str) -> DeviceCalibration:
@@ -59,4 +90,6 @@ def load_calibration(filepath: str) -> DeviceCalibration:
     Returns:
     - calibration: Calibration, the loaded calibration object.
     """
-    raise NotImplementedError
+    with h5py.File(filepath, "r") as f:
+        data = {key: f[key][()] for key in f.keys()}
+    return DeviceCalibration(**data)

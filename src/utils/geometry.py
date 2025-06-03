@@ -1,46 +1,7 @@
 from dataclasses import dataclass
 import numpy as np
 from skimage.draw import polygon2mask
-
-
-@dataclass(frozen=True)
-class DeviceCalibration:
-    """
-    Calibration parameters for converting pixel coordinates to [0, 1] range.
-    Attributes:
-    - image_shape: tuple of ints, shape of the image (default: (768, 1024)).
-    - xrange: tuple of floats, range for x-coordinates (default: (0.0, 1.0)). Used for cropping.
-    - yrange: tuple of floats, range for y-coordinates (default: (0.0, 1.0)). Used for cropping.
-    """
-
-    device_shape: tuple[int, int] = (768, 1024)
-    xrange: tuple[float, float] = (0.0, 1.0)
-    yrange: tuple[float, float] = (0.0, 1.0)
-    pixel_size: tuple[float, float] = (1.0, 1.0)  # Size of a pixel in µm
-
-    def um_to_px(self, coords: np.ndarray) -> np.ndarray:
-        """
-        Convert normalized coordinates to pixel coordinates based on the calibration ranges.
-
-        Parameters:
-        - coords: (N, 2) array_like, normalized coordinates in µm.
-
-        Returns:
-        - px_coords: (N, 2) array_like, pixel coordinates.
-        """
-        raise NotImplementedError
-
-    def um_from_px(self, px_coords: np.ndarray) -> np.ndarray:
-        """
-        Convert pixel coordinates to normalized coordinates based on the calibration ranges.
-
-        Parameters:
-        - px_coords: (N, 2) array_like, pixel coordinates.
-
-        Returns:
-        - coords: (N, 2) array_like, normalized coordinates in [0, 1] range.
-        """
-        raise NotImplementedError
+from .calibration import DeviceCalibration
 
 
 @dataclass(frozen=True)
@@ -123,9 +84,8 @@ def polygons_to_mask(polygons, calibration: DeviceCalibration):
     Convert a list of polygons to a binary mask.
 
     Parameters:
-    - image_shape: tuple, shape of the image (height, width).
-    - polygons: list of (N, 2) array_like. The coordinates are (row, column).
-    - calibration: tuple
+    - polygons: list of polygons, where each polygon is a (N, 2) numpy array of vertices in image coordinates.
+    - calibration: DeviceCalibration, calibration parameters for converting coordinates.
 
     Returns:
     - mask: 2D numpy array, binary mask with `True` inside the polygons and `False` outside.
@@ -133,7 +93,7 @@ def polygons_to_mask(polygons, calibration: DeviceCalibration):
     mask = np.zeros(calibration.device_shape, dtype=bool)
 
     for polygon in polygons:
-        # Scale the polygon coordinates according to the calibration ranges
-        mask |= polygon2mask(calibration.device_shape, calibration.to_px(polygon))
+        polygon_device = calibration.image_to_device(polygon.T).T
+        mask |= polygon2mask(calibration.device_shape, polygon_device)
 
     return mask

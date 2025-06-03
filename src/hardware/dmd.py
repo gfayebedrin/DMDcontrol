@@ -113,3 +113,9 @@ class DMD:
     def reset(self):
         self.delete()
         self.__init__()
+
+    def show_first_frame(self):
+        raise NotImplementedError
+    
+    def show_next_frame(self):
+        raise NotImplementedError

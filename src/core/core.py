@@ -1,3 +1,4 @@
+import numpy.typing as npt
 from ..hardware import DMD
 
 

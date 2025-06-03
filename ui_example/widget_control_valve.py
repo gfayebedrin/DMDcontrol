@@ -1,22 +1,24 @@
 """Control valve widget"""
+
 import cv2
 import numpy as np
 import screeninfo
 from PySide6.QtWidgets import QWidget
 from PySide6.QtCore import QTime, QTimer
 
-from sessions.FishFood.widgets.ui_widget_control_valve import Ui_WidgetControlValve
+from .ui_widget_control_valve import Ui_WidgetControlValve
 from loader.mainwindow import MainWindow
 
-COLOR_RGB={
-    'Blue':[1,0,0],
-    'Green':[0,1,0],
-    'Red':[0,0,1],
-    'Black':[0,0,0],
-    'White':[1,1,1]
+COLOR_RGB = {
+    "Blue": [1, 0, 0],
+    "Green": [0, 1, 0],
+    "Red": [0, 0, 1],
+    "Black": [0, 0, 0],
+    "White": [1, 1, 1],
 }
 
-def display_monochrome_image(screen_id:int, color_rgb:list):
+
+def display_monochrome_image(screen_id: int, color_rgb: list):
     """Display monochrome image on the monitor"""
     # get the size of the screen
     screen = screeninfo.get_monitors()[screen_id]
@@ -25,18 +27,20 @@ def display_monochrome_image(screen_id:int, color_rgb:list):
     image = np.ones((height, width, 3), dtype=np.float32)
     image[:, :] = color_rgb  # red at bottom-right
 
-    window_name = 'projector'
+    window_name = "projector"
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
     cv2.moveWindow(window_name, screen.x - 1, screen.y - 1)
-    cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN,
-                            cv2.WINDOW_FULLSCREEN)
+    cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
     cv2.imshow(window_name, image)
+
 
 class WidgetControlValve(QWidget):
     """Widget for camera parameters"""
+
     number_of_iteration = 0
-    duree = QTime(0,0,0)
-    def __init__(self, acquisition, worker, parent:MainWindow=None):
+    duree = QTime(0, 0, 0)
+
+    def __init__(self, acquisition, worker, parent: MainWindow = None):
         super().__init__(parent)
         self.ui = Ui_WidgetControlValve()
         self.ui.setupUi(self)
@@ -75,7 +79,7 @@ class WidgetControlValve(QWidget):
         self.ui.push_button_close_valve.setVisible(True)
         opening_time = self.ui.spin_box_opening_time.value()
         if "arduino" in self.acquisition.devices:
-            self.acquisition.devices["arduino"].open_valve(opening_time/1000)
+            self.acquisition.devices["arduino"].open_valve(opening_time / 1000)
         QTimer.singleShot(opening_time, self._ui_close_valve)
 
     def _ui_close_valve(self):
@@ -94,8 +98,8 @@ class WidgetControlValve(QWidget):
         color = self.ui.combo_box_color.currentText()
         time_minute = self.ui.time_edit_video_time.time().minute()
         time_second = self.ui.time_edit_video_time.time().second()
-        display_time = int(time_minute*60 + time_second)*1000
-        if color == 'None':
+        display_time = int(time_minute * 60 + time_second) * 1000
+        if color == "None":
             self._stop_display()
         else:
             color_rgb = COLOR_RGB[color]
@@ -107,7 +111,7 @@ class WidgetControlValve(QWidget):
         """Stop the display"""
         screen_id = self.ui.combo_box_screen_number.currentIndex()
         color = self.ui.combo_box_color_while_waiting.currentText()
-        if color == 'None':
+        if color == "None":
             self._stop_display()
         else:
             color_rgb = COLOR_RGB[color]
@@ -123,24 +127,29 @@ class WidgetControlValve(QWidget):
         self._update_screen()
 
     def _update_time(self):
-        nombre_iteration = self.ui.spin_box_number_iteration.value() - WidgetControlValve.number_of_iteration
-        #En millisecondes
+        nombre_iteration = (
+            self.ui.spin_box_number_iteration.value()
+            - WidgetControlValve.number_of_iteration
+        )
+        # En millisecondes
         temps_inter_ouverture = self.ui.time_edit_between_opening.time()
 
         if WidgetControlValve.number_of_iteration == 0:
             temps_init = self.ui.time_edit_init_time.time()
         else:
             temps_init = temps_inter_ouverture
-        seconds = nombre_iteration*temps_inter_ouverture.second()
-        minutes = nombre_iteration*temps_inter_ouverture.minute()
-        WidgetControlValve.duree = temps_init.addSecs(60*minutes+seconds)
-        self.ui.label_total_time_value.setText(WidgetControlValve.duree.toString('hh:mm:ss'))
+        seconds = nombre_iteration * temps_inter_ouverture.second()
+        minutes = nombre_iteration * temps_inter_ouverture.minute()
+        WidgetControlValve.duree = temps_init.addSecs(60 * minutes + seconds)
+        self.ui.label_total_time_value.setText(
+            WidgetControlValve.duree.toString("hh:mm:ss")
+        )
 
     def _update_end_time(self):
         now = QTime.currentTime()
         duree = WidgetControlValve.duree
-        end = now.addSecs(60*(60*duree.hour()+duree.minute())+duree.second())
-        self.ui.label_end_time_value.setText(end.toString('hh:mm:ss'))
+        end = now.addSecs(60 * (60 * duree.hour() + duree.minute()) + duree.second())
+        self.ui.label_end_time_value.setText(end.toString("hh:mm:ss"))
 
     def _start_sequence(self):
         """Start the sequence"""
@@ -149,7 +158,7 @@ class WidgetControlValve(QWidget):
         self.ui.push_button_abort_sequence.setVisible(True)
         self._update_time()
         self._update_end_time()
-        
+
         if self.ui.checkbox_record_sequence.isChecked():
             self.worker.start_record()
         self._wait_display()
@@ -159,20 +168,22 @@ class WidgetControlValve(QWidget):
             self.ui.progress_bar.setValue(0)
             init_time = self.ui.time_edit_init_time.time()
             self.timer.timeout.connect(self._run_sequence)
-            self.timer.start(1000*(init_time.second() + 60*init_time.minute()))
+            self.timer.start(1000 * (init_time.second() + 60 * init_time.minute()))
 
     def _run_sequence(self):
         """Run the sequence"""
         self.timer.stop()
         nombre_iteration = self.ui.spin_box_number_iteration.value()
-        percent = WidgetControlValve.number_of_iteration/nombre_iteration
-        print(int(percent*100), self.timer.isSingleShot())
-        self.ui.progress_bar.setValue(int(percent*100))
+        percent = WidgetControlValve.number_of_iteration / nombre_iteration
+        print(int(percent * 100), self.timer.isSingleShot())
+        self.ui.progress_bar.setValue(int(percent * 100))
         if WidgetControlValve.number_of_iteration < nombre_iteration:
             self._deliver_food()
             WidgetControlValve.number_of_iteration += 1
             waiting_time = self.ui.time_edit_between_opening.time()
-            self.timer.start(1000*(waiting_time.second() + 60*waiting_time.minute()))
+            self.timer.start(
+                1000 * (waiting_time.second() + 60 * waiting_time.minute())
+            )
         else:
             self._abort_sequence()
 

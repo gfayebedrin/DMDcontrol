@@ -1,3 +1,7 @@
+"""
+Wrapper for the ALP-4.3 API to control a DMD device.
+"""
+
 from . import ALP4
 from functools import cached_property
 import numpy as np

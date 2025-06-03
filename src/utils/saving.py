@@ -1,6 +1,10 @@
+"""
+Saving and loading utilities for pattern sequences and dmd calibrations.
+"""
+
 import h5py
 import numpy.typing as npt
-from .calibration import DeviceCalibration
+from .calibration import DMDCalibration
 from dataclasses import asdict
 
 
@@ -67,7 +71,7 @@ def load_pattern_sequence(
     return patterns, sequence, timings
 
 
-def save_calibration(filepath: str, calibration: DeviceCalibration):
+def save_calibration(filepath: str, calibration: DMDCalibration):
     """
     Save a calibration object to an HDF5 file.
 
@@ -80,7 +84,7 @@ def save_calibration(filepath: str, calibration: DeviceCalibration):
             f.create_dataset(key, data=value)
 
 
-def load_calibration(filepath: str) -> DeviceCalibration:
+def load_calibration(filepath: str) -> DMDCalibration:
     """
     Load a calibration object from an HDF5 file.
 
@@ -92,4 +96,4 @@ def load_calibration(filepath: str) -> DeviceCalibration:
     """
     with h5py.File(filepath, "r") as f:
         data = {key: f[key][()] for key in f.keys()}
-    return DeviceCalibration(**data)
+    return DMDCalibration(**data)

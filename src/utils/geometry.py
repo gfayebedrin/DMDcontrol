@@ -1,7 +1,11 @@
+"""
+Geometry utilities for handling coordinate transformations and polygon masks.
+"""
+
 from dataclasses import dataclass
 import numpy as np
 from skimage.draw import polygon2mask
-from .calibration import DeviceCalibration
+from .calibration import DMDCalibration
 
 
 @dataclass(frozen=True)
@@ -79,21 +83,21 @@ class PatternCoordinates:
         return transformed_coords[:2]
 
 
-def polygons_to_mask(polygons, calibration: DeviceCalibration):
+def polygons_to_mask(polygons, calibration: DMDCalibration):
     """
     Convert a list of polygons to a binary mask.
 
     Parameters:
     - polygons: list of polygons, where each polygon is a (N, 2) numpy array of vertices in image coordinates.
-    - calibration: DeviceCalibration, calibration parameters for converting coordinates.
+    - calibration: DMDCalibration, calibration parameters for converting coordinates.
 
     Returns:
     - mask: 2D numpy array, binary mask with `True` inside the polygons and `False` outside.
     """
-    mask = np.zeros(calibration.device_shape, dtype=bool)
+    mask = np.zeros(calibration.dmd_shape, dtype=bool)
 
     for polygon in polygons:
-        polygon_device = calibration.image_to_device(polygon.T).T
-        mask |= polygon2mask(calibration.device_shape, polygon_device)
+        polygon_dmd = calibration.image_to_dmd(polygon.T).T
+        mask |= polygon2mask(calibration.dmd_shape, polygon_dmd)
 
     return mask

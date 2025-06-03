@@ -1,7 +1,7 @@
-#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
 Created on Wed Oct 05 15:48:53 2016
+Modified by Guillaume Faye-Bédrin in June 2025
 
 @author: Sebastien Popoff
 """
@@ -9,12 +9,7 @@ Created on Wed Oct 05 15:48:53 2016
 import ctypes as ct
 import platform
 import numpy as np
-import six
-
-if six.PY3:
-    import winreg as _winreg
-else:
-    import _winreg
+import winreg
 
 # Standard parameter
 ALP_DEFAULT = 0
@@ -429,9 +424,9 @@ class ALP4(object):
 
         if libDir is None:
             try:
-                reg = _winreg.ConnectRegistry(None, _winreg.HKEY_LOCAL_MACHINE)
-                key = _winreg.OpenKey(reg, r"SOFTWARE\ViALUX\ALP-" + version)
-                libDir = (_winreg.QueryValueEx(key, "Path"))[
+                reg = winreg.ConnectRegistry(None, winreg.HKEY_LOCAL_MACHINE)
+                key = winreg.OpenKey(reg, r"SOFTWARE\ViALUX\ALP-" + version)
+                libDir = (winreg.QueryValueEx(key, "Path"))[
                     0
                 ] + "/ALP-{0} high-speed API/".format(version)
             except EnvironmentError:

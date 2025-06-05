@@ -13,6 +13,15 @@ LIBDIR = r"C:\Program Files\ALP-4.3\ALP-4.3 API"
 
 
 class DMD:
+    """
+    Wrapper for the ALP-4.3 API to control a DMD device.
+    This class provides methods to initialize the device, upload frames, and display them.
+
+    Uploading frames is done by setting the `frames` property with a three-dimensional boolean array,
+    where the first dimension represents the frame index, and the second and third dimensions represent the pixel values (width, height).
+
+    Context manager support is provided to automatically release the DMD device when done.
+    """
 
     def __init__(self):
         self._alp4 = ALP4.ALP4(libDir=LIBDIR)
@@ -23,7 +32,6 @@ class DMD:
         self._alp4.SetTiming()
 
         self._frames = np.empty((0, 0, 0), dtype=bool)
-        self._is_frame_shown = False
 
     # Properties
 
@@ -71,24 +79,31 @@ class DMD:
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        self.delete()
+        self.free()
 
     # Private methods
 
     # Public methods
 
-    def delete(self):
+    def free(self):
+        """Release the DMD device."""
         self._alp4.Halt()
         self._alp4.Free()
 
     def reset(self):
-        self.delete()
+        """Reset the DMD device and reinitialize it."""
+        self.free()
         self.__init__()
 
-    def show_frame(self, frame_index:int):        
+    def show_frame(self, frame_index: int):
+        """Display a specific frame by its index.
+
+        Parameters:
+            frame_index (int): Index of the frame to display.
+        """
         flut = ALP4.tFlutWrite(
             nOffset=ctypes.c_long(0),
             nSize=ctypes.c_long(1),
-            FrameNumbers=(ctypes.c_ulong * 4096)(frame_index)
+            FrameNumbers=(ctypes.c_ulong * 4096)(frame_index),
         )
         self._alp4.ProjControlEx(ALP4.ALP_FLUT_WRITE_9BIT, ctypes.byref(flut))

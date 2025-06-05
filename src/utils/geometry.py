@@ -19,9 +19,9 @@ class PatternCoordinates:
     The local coordinate system is direct.
 
     Attributes:
-    - origin: tuple[float, float], origin of the local coordinate system in image coordinates.
-    - orientation: float, orientation of the local coordinate system in radians.
-    - field_size: float, size of the field in µm.
+        origin (tuple[float, float]): origin of the local coordinate system in image coordinates.
+        orientation (float, optional): orientation of the local coordinate system in radians.
+        field_size (float, optional): size of the field in µm.
     """
 
     origin: tuple[float, float] = (0.0, 0.0)
@@ -31,7 +31,7 @@ class PatternCoordinates:
     @property
     def local_to_image_matrix(self) -> np.ndarray:
         """
-        Get the transformation matrix from local coordinates to image coordinates.
+        Transformation matrix from local coordinates to image coordinates.
         The matrix is a 3x3 affine transformation matrix.
         """
         d = self.field_size
@@ -49,7 +49,7 @@ class PatternCoordinates:
     @property
     def image_to_local_matrix(self) -> np.ndarray:
         """
-        Get the transformation matrix from image coordinates to local coordinates.
+        Transformation matrix from image coordinates to local coordinates.
         The matrix is a 3x3 affine transformation matrix.
         """
         return np.linalg.inv(self.local_to_image_matrix)
@@ -59,10 +59,10 @@ class PatternCoordinates:
         Convert local coordinates to image coordinates.
 
         Parameters:
-        - coords: (2,...) array_like, local coordinates in µm.
+            coords (ndarray): Local coordinates in µm. (2,...) array_like.
 
         Returns:
-        - (2,...) array_like, image coordinates in [0, 1] range.
+            coords (ndarray): Image coordinates in [0, 1] range. (2,...) array_like.
         """
         affine_coords = np.stack((*coords, np.ones(coords.shape[1:])), axis=0)
         transformed_coords = self.local_to_image_matrix @ affine_coords
@@ -73,26 +73,26 @@ class PatternCoordinates:
         Convert image coordinates to local coordinates.
 
         Parameters:
-        - coords: (2,...) array_like, image coordinates in [0, 1] range.
+            coords (ndarray): Image coordinates in [0, 1] range. (2,...) array_like.
 
         Returns:
-        - (2,...) array_like, local coordinates in µm.
+            coords (ndarray): Local coordinates in µm. (2,...) array_like.
         """
         affine_coords = np.stack((*coords, np.ones(coords.shape[1:])), axis=0)
         transformed_coords = self.image_to_local_matrix @ affine_coords
         return transformed_coords[:2]
 
 
-def polygons_to_mask(polygons, calibration: DMDCalibration):
+def polygons_to_mask(polygons: list[np.ndarray], calibration: DMDCalibration):
     """
-    Convert a list of polygons to a binary mask.
+    Convert a list of polygons to a boolean mask.
 
     Parameters:
-    - polygons: list of polygons, where each polygon is a (N, 2) numpy array of vertices in image coordinates.
-    - calibration: DMDCalibration, calibration parameters for converting coordinates.
+        polygons (list[ndarray]): list of polygons, where each polygon is a (N, 2) numpy array of vertices in image coordinates.
+        calibration (DMDCalibration): calibration parameters for converting coordinates.
 
     Returns:
-    - mask: 2D numpy array, binary mask with `True` inside the polygons and `False` outside.
+        mask (ndarray): Boolean 2D mask with `True` inside the polygons and `False` outside.
     """
     mask = np.zeros(calibration.dmd_shape, dtype=bool)
 

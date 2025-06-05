@@ -11,18 +11,19 @@ import ctypes
 # Directory where the ALP-4.3 API is located
 LIBDIR = r"C:\Program Files\ALP-4.3\ALP-4.3 API"
 
-# Maximum number of distinct values in FLUT entries
-FLUT_MAX_VALUES9 = 2**9
-FLUT_MAX_VALUES18 = 2**18
-
 
 class DMD:
 
     def __init__(self):
         self._alp4 = ALP4.ALP4(libDir=LIBDIR)
         self._alp4.Initialize()
+        self._alp4.SeqControl(ALP4.ALP_FLUT_MODE, ALP4.ALP_FLUT_9BIT)
+        # may need to set ALP_FLUT_ENTRIES9 to 2*len(sequence) according to C++ sample
+        self._alp4.SeqControl(ALP4.ALP_BIN_MODE, ALP4.ALP_BIN_UNINTERRUPTED)
+        self._alp4.SetTiming()
+
         self._frames = np.empty((0, 0, 0), dtype=bool)
-        self._sequence = np.empty((0,), dtype=np.integer)
+        self._is_frame_shown = False
 
     # Properties
 
@@ -34,8 +35,7 @@ class DMD:
     @cached_property
     def max_frames(self):
         """Maximum number of frames."""
-        max_avail_memory = self._alp4.DevInquire(ALP4.ALP_AVAIL_MEMORY)
-        return min(max_avail_memory, FLUT_MAX_VALUES9)
+        return self._alp4.DevInquire(ALP4.ALP_AVAIL_MEMORY)
 
     @property
     def frames(self) -> npt.NDArray[np.integer]:
@@ -57,46 +57,13 @@ class DMD:
         self._frames = value
 
         bitstream = np.packbits(value)
+        self._alp4.Halt()
         self._alp4.FreeSeq()
         self._alp4.SeqAlloc(nbImg=value.shape[0])
         self._alp4.SeqPut(bitstream)
 
-    @cached_property
-    def max_sequence_length(self):
-        """Maximum length of the sequence."""
-        return self._alp4.ProjInquire(ALP4.ALP_FLUT_MAX_ENTRIES9)
-
-    @property
-    def sequence(self):
-        """Sequence in the device RAM. Defines the order of frames to be displayed.
-
-        One-dimensional integer array with shape (frames,)."""
-        return self._sequence
-
-    @sequence.setter
-    def sequence(self, value: npt.NDArray[np.integer]):
-        assert value.ndim == 1, "Value must be a 1D array (sequence)."
-        assert (
-            value.size <= self.max_frames
-        ), f"Sequence length exceeds maximum of {self.max_frames} frames."
-        assert np.issubdtype(
-            value.dtype, np.integer
-        ), "Sequence values must be integers."
-        assert np.all(
-            (value >= 0) & (value < FLUT_MAX_VALUES9)
-        ), f"Sequence values must be between 0 and {FLUT_MAX_VALUES9}."
-
-        flut_write_struct = ALP4.tFlutWrite(
-            nOffset=ctypes.c_long(0),
-            nSize=ctypes.c_long(value.size),
-            FrameNumbers=(ctypes.c_ulong * self.max_sequence_length)(*value),
-        )
-
-        self._alp4.ProjControlEx(
-            ALP4.ALP_FLUT_WRITE_9BIT, ctypes.byref(flut_write_struct)
-        )
-
-        self._sequence = value
+        self.show_frame(0)
+        self._alp4.Run()
 
     # Dunder methods
 
@@ -118,8 +85,10 @@ class DMD:
         self.delete()
         self.__init__()
 
-    def show_first_frame(self):
-        raise NotImplementedError
-    
-    def show_next_frame(self):
-        raise NotImplementedError
+    def show_frame(self, frame_index:int):        
+        flut = ALP4.tFlutWrite(
+            nOffset=ctypes.c_long(0),
+            nSize=ctypes.c_long(1),
+            FrameNumbers=(ctypes.c_ulong * 4096)(frame_index)
+        )
+        self._alp4.ProjControlEx(ALP4.ALP_FLUT_WRITE_9BIT, ctypes.byref(flut))

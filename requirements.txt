@@ -1,0 +1,16 @@
+cached-property @ file:///home/conda/feedstock_root/build_artifacts/cached_property_1615209429212/work
+h5py @ file:///home/conda/feedstock_root/build_artifacts/h5py_1746440965359/work
+imagecodecs @ file:///home/conda/feedstock_root/build_artifacts/imagecodecs_1748740285176/work
+imageio @ file:///home/conda/feedstock_root/build_artifacts/imageio_1738273805233/work
+importlib_metadata @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_importlib-metadata_1747934053/work
+lazy_loader @ file:///home/conda/feedstock_root/build_artifacts/lazy-loader_1733636780672/work
+networkx @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_networkx_1731521053/work
+numpy @ file:///home/conda/feedstock_root/build_artifacts/numpy_1747544626951/work/dist/numpy-2.2.6-cp313-cp313-linux_x86_64.whl#sha256=8661adb26b014b72493896c739cc34a4ab07d81102a760d339e7bf11fd182047
+packaging @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_packaging_1745345660/work
+pillow @ file:///home/conda/feedstock_root/build_artifacts/pillow_1746646213722/work
+PyWavelets==1.8.0
+scikit-image @ file:///home/conda/feedstock_root/build_artifacts/scikit-image_1747532661254/work/dist/scikit_image-0.25.2-cp313-cp313-linux_x86_64.whl#sha256=5b7d19bd62195fd1e8d38a10daf107f5fc35541eab30de354966f1f61db0fea6
+scipy @ file:///home/conda/feedstock_root/build_artifacts/scipy-split_1739790645292/work/dist/scipy-1.15.2-cp313-cp313-linux_x86_64.whl#sha256=9233a1b3513262c15ef8696233b9abd49f691223e9dcc32da39377a3a0d4e7fe
+shiboken6==6.9.0
+tifffile @ file:///home/conda/feedstock_root/build_artifacts/tifffile_1748349235975/work
+zipp @ file:///home/conda/feedstock_root/build_artifacts/zipp_1748277385522/work

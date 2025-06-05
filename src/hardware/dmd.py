@@ -26,10 +26,6 @@ class DMD:
     def __init__(self):
         self._alp4 = ALP4.ALP4(libDir=LIBDIR)
         self._alp4.Initialize()
-        self._alp4.SeqControl(ALP4.ALP_FLUT_MODE, ALP4.ALP_FLUT_9BIT)
-        # may need to set ALP_FLUT_ENTRIES9 to 2*len(sequence) according to C++ sample
-        self._alp4.SeqControl(ALP4.ALP_BIN_MODE, ALP4.ALP_BIN_UNINTERRUPTED)
-        self._alp4.SetTiming()
 
         self._frames = np.empty((0, 0, 0), dtype=bool)
 
@@ -69,6 +65,11 @@ class DMD:
         self._alp4.FreeSeq()
         self._alp4.SeqAlloc(nbImg=value.shape[0])
         self._alp4.SeqPut(bitstream)
+
+        self._alp4.SeqControl(ALP4.ALP_FLUT_MODE, ALP4.ALP_FLUT_9BIT)
+        # may need to set ALP_FLUT_ENTRIES9 to 2*len(sequence) according to C++ sample
+        self._alp4.SeqControl(ALP4.ALP_BIN_MODE, ALP4.ALP_BIN_UNINTERRUPTED)
+        self._alp4.SetTiming()
 
         self.show_frame(0)
         self._alp4.Run()

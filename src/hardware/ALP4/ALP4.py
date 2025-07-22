@@ -849,7 +849,7 @@ class ALP4(object):
         ----------
 
         inquireType : ctypes c_ulong
-                      Sepcifies the type of value to return.
+                      Specifies the type of value to return.
 
 
         RETURNS
@@ -884,7 +884,7 @@ class ALP4(object):
         ----------
 
         inquireType : ctypes c_ulong
-                  Sepcifies the type of value to return.
+                  Specifies the type of value to return.
         SequenceId : ctyles c_long, optional
                      Identified of the sequence. If not specified, set the last sequence allocated in the DMD board memory
 
@@ -912,17 +912,15 @@ class ALP4(object):
         )
         return ret.value
 
-    def ProjInquire(self, inquireType, SequenceId=None):
+    def ProjInquire(self, inquireType):
         """
-        Usage: ProjInquire(self, inquireType, SequenceId = None)
+        Usage: ProjInquire(self, inquireType)
 
         PARAMETERS
         ----------
 
         request : ctypes c_ulong
-                  Sepcifies the type of value to return.
-        SequenceId : ctyles c_long, optional
-                     Identified of the sequence. If not specified, set the last sequence allocated in the DMD board memory
+                  Specifies the type of value to return.
 
         RETURNS
         -------
@@ -937,31 +935,26 @@ class ALP4(object):
         """
         ret = ct.c_long(0)
 
-        if (SequenceId is None) and (self._lastDDRseq):
-            SequenceId = self._lastDDRseq
-
         self._checkError(
             self._ALPLib.AlpProjInquire(
-                self.ALP_ID, SequenceId, inquireType, ct.byref(ret)
+                self.ALP_ID, inquireType, ct.byref(ret)
             ),
             "Error sending request.",
         )
         return ret.value
 
-    def ProjInquireEx(self, inquireType, SequenceId=None):
+    def ProjInquireEx(self, inquireType):
         """
         Data objects that do not fit into a simple 32-bit number can be inquired using this function.
         Meaning and layout of the data depend on the InquireType.
 
-        Usage: ProjInquireEx(self, inquireType, UserStructPtr, SequenceId = None)
+        Usage: ProjInquireEx(self, inquireType, UserStructPtr)
 
         PARAMETERS
         ----------
 
         inquireType : ctypes c_ulong
-                      Sepcifies the type of value to return.
-        SequenceId : ctypes c_long, optional
-                     Identified of the sequence. If not specified, set the last sequence allocated in the DMD board memory
+                      Specifies the type of value to return.
 
         RETURNS
         -------
@@ -976,12 +969,9 @@ class ALP4(object):
         """
         UserStructPtr = ct.c_double(0)
 
-        if (SequenceId is None) and (self._lastDDRseq):
-            SequenceId = self._lastDDRseq
-
         self._checkError(
             self._ALPLib.AlpProjInquire(
-                self.ALP_ID, SequenceId, inquireType, ct.byref(UserStructPtr)
+                self.ALP_ID, inquireType, ct.byref(UserStructPtr)
             ),
             "Error sending request.",
         )
@@ -1088,7 +1078,7 @@ class ALP4(object):
         See AlpProjControlEx in the ALP API description for control types.
         """
         self._checkError(
-            self._ALPLib.AlpProjContro(self.ALP_ID, controlType, pointerToStruct),
+            self._ALPLib.AlpProjControl(self.ALP_ID, controlType, pointerToStruct),
             "Error sending request.",
         )
 
@@ -1143,6 +1133,9 @@ class ALP4(object):
         SequenceId : ctypes c_long, optional
                      Identified of the sequence. If not specified, free the last sequence allocated in the DMD board memory
         """
+
+        if (SequenceId is None) and (self._lastDDRseq is None):
+            return
 
         if (SequenceId is None) and (self._lastDDRseq):
             SequenceId = self._lastDDRseq

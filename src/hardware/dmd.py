@@ -60,11 +60,10 @@ class DMD:
 
         self._frames = value
 
-        bitstream = np.packbits(value)
         self._alp4.Halt()
-        self._alp4.FreeSeq()
+        self._alp4.FreeSeq() # TODO does not work if not already allocated
         self._alp4.SeqAlloc(nbImg=value.shape[0])
-        self._alp4.SeqPut(bitstream)
+        self._alp4.SeqPut(value)
 
         self._alp4.SeqControl(ALP4.ALP_FLUT_MODE, ALP4.ALP_FLUT_9BIT)
         # may need to set ALP_FLUT_ENTRIES9 to 2*len(sequence) according to C++ sample

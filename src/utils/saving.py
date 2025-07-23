@@ -3,6 +3,7 @@ Saving and loading utilities for pattern sequences and dmd calibrations.
 """
 
 import h5py
+from datetime import timedelta
 import numpy.typing as npt
 from .calibration import DMDCalibration
 from .sequence import PatternSequence
@@ -11,8 +12,8 @@ from dataclasses import asdict
 
 # Constants for HDF5 dataset names
 SEQUENCE = "sequence"
-TIMINGS = "timings"
-DURATIONS = "durations"
+TIMINGS = "timings_ms"
+DURATIONS = "durations_ms"
 PATTERNS = "patterns"
 PATTERN = "pattern_{}"
 POLYGON = "polygon_{}"
@@ -31,8 +32,8 @@ def save_pattern_sequence(
     """
     with h5py.File(filepath, "w") as f:
         f.create_dataset(SEQUENCE, data=pattern_sequence.sequence)
-        f.create_dataset(TIMINGS, data=pattern_sequence.timings)
-        f.create_dataset(DURATIONS, data=pattern_sequence.durations)
+        f.create_dataset(TIMINGS, data=pattern_sequence.timings_milliseconds)
+        f.create_dataset(DURATIONS, data=pattern_sequence.durations_milliseconds)
         f.create_group(PATTERNS, track_order=True)
         for i, pattern in enumerate(pattern_sequence.patterns):
             pattern_group = f[PATTERNS].create_group(
@@ -56,8 +57,8 @@ def load_pattern_sequence(
     """
     with h5py.File(filepath, "r") as f:
         sequence = f[SEQUENCE][()]
-        timings = f[TIMINGS][()]
-        durations = f[DURATIONS][()]
+        timings_ms = f[TIMINGS][()]
+        durations_ms = f[DURATIONS][()]
         patterns = []
         for pattern_name in f[PATTERNS]:
             pattern_group = f[PATTERNS][pattern_name]
@@ -69,8 +70,8 @@ def load_pattern_sequence(
     return PatternSequence(
         patterns=patterns,
         sequence=sequence,
-        timings=timings,
-        durations=durations
+        timings=[timedelta(milliseconds=t) for t in timings_ms],
+        durations=[timedelta(milliseconds=d) for d in durations_ms]
     )
 
 

@@ -61,12 +61,14 @@ class DMD:
         self._frames = value
 
         self._alp4.Halt()
-        self._alp4.FreeSeq() # TODO does not work if not already allocated
+        self._alp4.FreeSeq()
         self._alp4.SeqAlloc(nbImg=value.shape[0])
         self._alp4.SeqPut(value)
 
         self._alp4.SeqControl(ALP4.ALP_FLUT_MODE, ALP4.ALP_FLUT_9BIT)
-        # may need to set ALP_FLUT_ENTRIES9 to 2*len(sequence) according to C++ sample
+        self._alp4.SeqControl(
+            ALP4.ALP_FLUT_ENTRIES9, value.shape[0]
+        )  # may need to set ALP_FLUT_ENTRIES9 to 2*len(sequence) according to C++ sample, although this would correspond to 18 bits
         self._alp4.SeqControl(ALP4.ALP_BIN_MODE, ALP4.ALP_BIN_UNINTERRUPTED)
         self._alp4.SetTiming()
 

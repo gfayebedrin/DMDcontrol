@@ -1,5 +1,5 @@
 import numpy as np
-from . import ALP4
+from src.hardware.ALP4 import *
 import ctypes as ct
 
 # Load the Vialux .dll
@@ -34,15 +34,15 @@ DMD.Halt()
 
 frame_numbers = [0, 2, 1, 2]
 
-flut = ALP4.tFlutWrite(
+flut = tFlutWrite(
     nOffset=ct.c_long(0),
     nSize=ct.c_long(len(frame_numbers)),
     FrameNumbers=(ct.c_ulong * 4096)(*frame_numbers),
 )
 
-DMD.SeqControl(ALP4.ALP_FLUT_MODE, ALP4.ALP_FLUT_9BIT)
-DMD.SeqControl(ALP4.ALP_FLUT_ENTRIES9, len(frame_numbers))
-DMD.ProjControlEx(ALP4.ALP_FLUT_WRITE_9BIT, ct.byref(flut))
+DMD.SeqControl(ALP_FLUT_MODE, ALP_FLUT_9BIT)
+DMD.SeqControl(ALP_FLUT_ENTRIES9, len(frame_numbers))
+DMD.ProjControlEx(ALP_FLUT_WRITE_9BIT, ct.byref(flut))
 
 DMD.Run()
 input("Press Enter to stop...")

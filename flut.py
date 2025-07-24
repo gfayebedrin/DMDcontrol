@@ -32,17 +32,32 @@ DMD.Halt()
 
 # FLUT display
 
-frame_numbers = [0, 2, 1, 2]
 
-flut = tFlutWrite(
-    nOffset=ct.c_long(0),
-    nSize=ct.c_long(len(frame_numbers)),
-    FrameNumbers=(ct.c_ulong * 4096)(*frame_numbers),
-)
+DMD.SeqControl(2107, 6)
+DMD.SeqControl(2108, 7)
+print(DMD.ProjInquire(2356))
 
-DMD.SeqControl(ALP_FLUT_MODE, ALP_FLUT_9BIT)
-DMD.SeqControl(ALP_FLUT_ENTRIES9, len(frame_numbers))
-DMD.ProjControlEx(ALP_FLUT_WRITE_9BIT, ct.byref(flut))
+flut = tFlutWrite()
+flut.nOffset = 0
+flut.nSize = 7
+pattern = [2, 1, 2, 0, 2, 1, 2]
+
+for i in range(7):
+    flut.FrameNumbers[i] = pattern[i]
+
+DMD.ProjControlEx(2357, ct.byref(flut))
+
+# frame_numbers = [0, 2, 1, 2]
+
+# flut = tFlutWrite(
+#     nOffset=ct.c_long(0),
+#     nSize=ct.c_long(len(frame_numbers)),
+#     FrameNumbers=(ct.c_ulong * 4096)(*frame_numbers),
+# )
+
+# DMD.SeqControl(ALP_FLUT_MODE, ALP_FLUT_9BIT)
+# DMD.SeqControl(ALP_FLUT_ENTRIES9, len(frame_numbers))
+# DMD.ProjControlEx(ALP_FLUT_WRITE_9BIT, ct.byref(flut))
 
 DMD.Run()
 input("Press Enter to stop...")

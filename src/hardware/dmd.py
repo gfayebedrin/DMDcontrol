@@ -63,7 +63,7 @@ class DMD:
         self._alp4.Halt()
         self._alp4.FreeSeq()
 
-        packed = np.packbits(~value.astype(bool), axis=-1, bitorder="big")
+        packed = np.packbits(~value.astype(bool).transpose((0,2,1)), axis=-1, bitorder="big")
         buf = np.ascontiguousarray(packed).ravel()
 
         self._alp4.Halt()

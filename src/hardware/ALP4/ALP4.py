@@ -1078,7 +1078,7 @@ class ALP4(object):
         See AlpProjControlEx in the ALP API description for control types.
         """
         self._checkError(
-            self._ALPLib.AlpProjControl(self.ALP_ID, controlType, pointerToStruct),
+            self._ALPLib.AlpProjControlEx(self.ALP_ID, controlType, pointerToStruct),
             "Error sending request.",
         )
 

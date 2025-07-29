@@ -124,6 +124,7 @@ class NamedPipeServer:
         self.bufsize = bufsize
         self._stop_event = threading.Event()
         self._thread = threading.Thread(target=self._listen, daemon=True)
+        self._pipe: Optional[pywintypes.HANDLE] = None
 
     # ––– public API –––
     def start(self):
@@ -135,13 +136,15 @@ class NamedPipeServer:
         self._stop_event.set()
         if isinstance(self.callback, CancellableTask):
             self.callback.stop()
+        if self._pipe is not None:
+            win32file.CloseHandle(self._pipe)
         if self._thread.is_alive():
             self._thread.join(TIMEOUT)
 
     # ––– internal –––
     def _listen(self):
         while not self._stop_event.is_set():
-            pipe = win32pipe.CreateNamedPipe(
+            pipe = self._pipe = win32pipe.CreateNamedPipe(
                 self.pipe_name,
                 win32pipe.PIPE_ACCESS_DUPLEX,
                 win32pipe.PIPE_TYPE_MESSAGE
@@ -164,7 +167,7 @@ class NamedPipeServer:
                     if not raw:
                         break
                     try:
-                        message = json.loads(raw.decode('utf-8'))
+                        message = json.loads(raw.decode("utf-8"))
                     except json.JSONDecodeError as ex:
                         self._safe_write(pipe, {"error": str(ex)})
                         continue
@@ -182,6 +185,7 @@ class NamedPipeServer:
                     self._safe_write(pipe, reply)
             finally:
                 win32file.CloseHandle(pipe)
+                self._pipe = None
                 time.sleep(SLEEP_TIME)  # avoid busy loop
 
     # helper that never raises back to the listen loop

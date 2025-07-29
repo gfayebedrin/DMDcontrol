@@ -59,9 +59,6 @@ import System.IO.Pipes.*
 import System.Text.*
 import System.Security.Principal.*
 
-% Convert payload
-payload = jsonencode(msg) + newline;  %#ok<STRNCAT> add LF terminator
-
 % Open & connect
 pipe = NamedPipeClientStream('.', pipeName, PipeDirection.InOut, ...
     PipeOptions.None, TokenImpersonationLevel.Impersonation);
@@ -74,11 +71,14 @@ catch ME
 end
 
 try
-    writer = StreamWriter(pipe, UTF8Encoding(false));
-    reader = StreamReader(pipe, UTF8Encoding(false));
-
+    enc  = Encoding.UTF8;                 % ← guaranteed UTF-8, with BOM flag off in R2017
+    
+    writer = StreamWriter(pipe, enc);     % use explicit encoding
     writer.AutoFlush = true;
-    writer.Write(payload);
+    writer.Write(jsonencode(msg));        % no BOM, one write call
+    writer.Write(char(10));               % send newline so server sees message boundary
+    
+    reader = StreamReader(pipe, enc);
 
     responseLine = char(reader.ReadLine());
     if isempty(responseLine)

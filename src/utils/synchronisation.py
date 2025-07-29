@@ -58,26 +58,26 @@ class CancellableTask:
         self._thread: Optional[threading.Thread] = None
         self._stop_evt = threading.Event()
 
-    def __call__(self, message: dict) -> dict | None:
+    def __call__(self, message: dict) -> dict:
         """
         Handle incoming messages to control the task.
         Reacts to messages defined in constant MESSAGES.
         """
         if MESSAGES.COMMAND_KEY not in message:
-            return
+            return {"status": "command_missing"}
         match message[MESSAGES.COMMAND_KEY]:
             case MESSAGES.START_CMD:
                 return self.start()
             case MESSAGES.STOP_CMD:
                 return self.stop()
             case _:
-                return
+                return {"status": "command_unknown"}
 
     def is_running(self) -> bool:
         """Check if the task is currently running."""
         return self._thread is not None and self._thread.is_alive()
 
-    def start(self) -> dict | None:
+    def start(self) -> dict:
         """Start the task if it is not already running."""
         if self.is_running():
             return {"status": "already_running"}
@@ -87,13 +87,13 @@ class CancellableTask:
         self._thread.start()
         return {"status": "started"}
 
-    def stop(self) -> dict | None:
+    def stop(self) -> dict:
         """Stop the task if it is running."""
         if not self.is_running():
             return {"status": "not_running"}
 
         self._stop_evt.set()
-        self._thread.join(timeout=TIMEOUT)
+        self._thread.join(TIMEOUT)
         return {"status": "stopped"}
 
     # ––– internal –––
@@ -138,7 +138,7 @@ class NamedPipeServer:
         if isinstance(self.callback, CancellableTask):
             self.callback.stop()
         if self._thread.is_alive():
-            self._thread.join(timeout=TIMEOUT)
+            self._thread.join(TIMEOUT)
 
     # ––– internal –––
     def _listen(self):
@@ -166,7 +166,7 @@ class NamedPipeServer:
                     if not raw:
                         break
                     try:
-                        message = json.loads(raw)
+                        message = json.loads(raw.decode('utf-8'))
                     except json.JSONDecodeError as ex:
                         self._safe_write(pipe, {"error": str(ex)})
                         continue

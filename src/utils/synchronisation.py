@@ -118,12 +118,10 @@ class NamedPipeServer:
         name: str = r"\\.\pipe\MatPy",
         callback: Optional[Callable[[dict], dict | None]] = None,
         bufsize: int = 65536,
-        should_reply: bool = False,
     ):
         self.pipe_name = name
         self.callback = callback
         self.bufsize = bufsize
-        self.should_reply = should_reply
         self._stop_event = threading.Event()
         self._thread = threading.Thread(target=self._listen, daemon=True)
 
@@ -188,8 +186,6 @@ class NamedPipeServer:
 
     # helper that never raises back to the listen loop
     def _safe_write(self, pipe, msg):
-        if not self.should_reply:
-            return
         try:
             win32file.WriteFile(pipe, json.dumps(msg).encode() + b"\n")
         except pywintypes.error:

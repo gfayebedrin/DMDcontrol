@@ -6,7 +6,7 @@ Usage:
 
     # Example cancellable task
     import time
-    def blink():
+    def blink(event):
         print("tick")
         time.sleep(0.5)
 
@@ -25,55 +25,105 @@ Usage:
     srv.callback = on_msg
     srv.start()
 """
+
 from __future__ import annotations
+import time
 import json, threading, traceback
 from typing import Callable, Literal, Optional
+from types import SimpleNamespace
 
 import win32pipe, win32file, pywintypes
 
 
-class CancellableTask:
-    """Run a function in its own thread that can be started and stopped via pipe messages."""
+MESSAGES = SimpleNamespace(COMMAND_KEY="cmd", START_CMD="start", STOP_CMD="stop")
+SLEEP_TIME = 0.01  # seconds
+TIMEOUT = 5  # seconds, for pipe connection
 
-    def __init__(self, func: Callable[[], None]):
+
+class CancellableTask:
+    """
+    Run a function in its own thread that can be started and stopped via pipe messages.
+    The function should accept a threading.Event parameter to check for cancellation.
+    """
+
+    def __init__(self, func: Callable[[threading.Event], None]):
+        """
+        Initialize the task with a function that accepts a threading.Event to check for cancellation.
+        The function should run in a loop, checking the event to stop gracefully.
+
+        Parameters:
+            func (Callable[[threading.Event], None]): The function to run in the task.
+        """
         self._func = func
         self._thread: Optional[threading.Thread] = None
         self._stop_evt = threading.Event()
 
-    def __call__(self, message: Literal["start", "stop"]):
-        match message:
-            case "start":
-                if self._thread and self._thread.is_alive():
-                    return {"status": "already_running"}
-                self._stop_evt.clear()
-                self._thread = threading.Thread(target=self._run, daemon=True)
-                self._thread.start()
-                return {"status": "started"}
-            case "stop":
-                if not self._thread or not self._thread.is_alive():
-                    return {"status": "not_running"}
-                self._stop_evt.set()
-                self._thread.join()
-                return {"status": "stopped"}
+    def __call__(self, message: dict) -> dict | None:
+        """
+        Handle incoming messages to control the task.
+        Reacts to messages defined in constant MESSAGES.
+        """
+        if MESSAGES.COMMAND_KEY not in message:
+            return
+        match message[MESSAGES.COMMAND_KEY]:
+            case MESSAGES.START_CMD:
+                return self.start()
+            case MESSAGES.STOP_CMD:
+                return self.stop()
             case _:
-                raise ValueError(f"Unknown message: {message}")
+                return
+
+    def is_running(self) -> bool:
+        """Check if the task is currently running."""
+        return self._thread is not None and self._thread.is_alive()
+
+    def start(self) -> dict | None:
+        """Start the task if it is not already running."""
+        if self.is_running():
+            return {"status": "already_running"}
+
+        self._stop_evt.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+        return {"status": "started"}
+
+    def stop(self) -> dict | None:
+        """Stop the task if it is running."""
+        if not self.is_running():
+            return {"status": "not_running"}
+
+        self._stop_evt.set()
+        self._thread.join(timeout=TIMEOUT)
+        return {"status": "stopped"}
 
     # ––– internal –––
     def _run(self):
         try:
-            self._func()
+            self._func(self._stop_evt)
         except Exception as ex:  # make sure a task crash doesn't kill the server thread
             print("CancellableTask crashed:", ex)
             traceback.print_exc()
+        finally:
+            # Ensure restart is possible
+            self._thread = None
+            self._stop_evt.set()
 
 
 class NamedPipeServer:
-    """Single‑client, message‑framed named‑pipe server that survives callback errors."""
+    """Single-client, message-framed named-pipe server that survives callback errors."""
 
-    def __init__(self, *, name: str = r"\\.\pipe\MatPy", callback=None, bufsize: int = 65536):
+    def __init__(
+        self,
+        *,
+        name: str = r"\\.\pipe\MatPy",
+        callback: Optional[Callable[[dict], dict | None]] = None,
+        bufsize: int = 65536,
+        should_reply: bool = False,
+    ):
         self.pipe_name = name
-        self.callback = callback  # Python callable (dict → dict | None)
+        self.callback = callback
         self.bufsize = bufsize
+        self.should_reply = should_reply
         self._stop_event = threading.Event()
         self._thread = threading.Thread(target=self._listen, daemon=True)
 
@@ -85,7 +135,10 @@ class NamedPipeServer:
     def stop(self):
         """Request shutdown and join the thread."""
         self._stop_event.set()
-        self._thread.join()
+        if isinstance(self.callback, CancellableTask):
+            self.callback.stop()
+        if self._thread.is_alive():
+            self._thread.join(timeout=TIMEOUT)
 
     # ––– internal –––
     def _listen(self):
@@ -97,8 +150,8 @@ class NamedPipeServer:
                 | win32pipe.PIPE_READMODE_MESSAGE
                 | win32pipe.PIPE_WAIT,
                 1,  # max instances
-                self.bufsize,  # out‑buffer
-                self.bufsize,  # in‑buffer
+                self.bufsize,  # out-buffer
+                self.bufsize,  # in-buffer
                 0,
                 None,
             )
@@ -113,7 +166,7 @@ class NamedPipeServer:
                     if not raw:
                         break
                     try:
-                        message = json.loads(raw.decode())
+                        message = json.loads(raw)
                     except json.JSONDecodeError as ex:
                         self._safe_write(pipe, {"error": str(ex)})
                         continue
@@ -131,10 +184,13 @@ class NamedPipeServer:
                     self._safe_write(pipe, reply)
             finally:
                 win32file.CloseHandle(pipe)
+                time.sleep(SLEEP_TIME)  # avoid busy loop
 
     # helper that never raises back to the listen loop
     def _safe_write(self, pipe, msg):
+        if not self.should_reply:
+            return
         try:
-            win32file.WriteFile(pipe, json.dumps(msg).encode())
+            win32file.WriteFile(pipe, json.dumps(msg).encode() + b"\n")
         except pywintypes.error:
             pass

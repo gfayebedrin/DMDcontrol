@@ -47,13 +47,17 @@ end
 pipeName = tokens{1};
 
 % Ensure .NET is available
-if ~usejava('net')
-    error('sendPipeMessage:JavaUnavailable','Java/.NET support is required on this platform.');
+if ~usejava('jvm')
+    error('JVM is not available.');
+elseif ~NET.isNETSupported
+    error('No supported Microsoft .NET runtime found.');
 end
 
+NET.addAssembly('System.Core');
 import System.IO.*
 import System.IO.Pipes.*
 import System.Text.*
+import System.Security.Principal.*
 
 % Convert payload
 payload = jsonencode(msg) + newline;  %#ok<STRNCAT> add LF terminator

@@ -71,12 +71,12 @@ catch ME
 end
 
 try
-    enc  = Encoding.UTF8;                 % ← guaranteed UTF-8, with BOM flag off in R2017
+    enc  = UTF8Encoding(false);                 % UTF-8 with BOM flag off in R2017
     
     writer = StreamWriter(pipe, enc);     % use explicit encoding
     writer.AutoFlush = true;
     writer.Write(jsonencode(msg));        % no BOM, one write call
-    writer.Write(char(10));               % send newline so server sees message boundary
+    writer.Write(newline);               % send newline so server sees message boundary
     
     reader = StreamReader(pipe, enc);
 

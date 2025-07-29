@@ -31,7 +31,7 @@ function reply = sendPipeMessage(msg, pipePath)
 %--------------------------------------------------------------------------
 
 if nargin < 2 || isempty(pipePath)
-    pipePath = '\\\\.\\pipe\\MatPy';
+    pipePath = '\\.\pipe\MatPy';
 end
 
 if ~ischar(pipePath) && ~isstring(pipePath)

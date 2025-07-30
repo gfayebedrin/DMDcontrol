@@ -29,15 +29,20 @@ Usage:
 from __future__ import annotations
 import time
 import json, threading, traceback
-from typing import Callable, Literal, Optional
+from typing import Callable, Optional
 from types import SimpleNamespace
-
+import ctypes, ctypes.wintypes as wt
 import win32pipe, win32file, pywintypes
 
 
 TASK_MESSAGES = SimpleNamespace(COMMAND_KEY="cmd", START_CMD="start", STOP_CMD="stop")
 SLEEP_TIME = 0.01  # seconds
 TIMEOUT = 5  # seconds, for pipe connection and task stop
+
+
+_CancelIoEx = ctypes.windll.kernel32.CancelIoEx
+_CancelIoEx.argtypes = [wt.HANDLE, wt.LPVOID]
+_CancelIoEx.restype = wt.BOOL
 
 
 class CancellableTask:
@@ -140,10 +145,7 @@ class NamedPipeServer:
             self.callback.stop()
 
         if self._pipe is not None:
-            try:
-                win32file.CancelIoEx(self._pipe, None)
-            except pywintypes.error:
-                pass
+            _CancelIoEx(self._pipe, None)
             win32file.CloseHandle(self._pipe)
 
         if self._thread.is_alive():

@@ -4,9 +4,8 @@ Utilities for handling pattern sequences and timing information.
 
 import numpy as np
 from dataclasses import dataclass
-import time
-from datetime import timedelta
-import threading
+import time, sched, threading
+from datetime import timedelta, datetime
 
 from ..hardware import DMD
 from ..utils.calibration import DMDCalibration
@@ -74,25 +73,42 @@ def play_pattern_sequence(
         timings[0] + delay >= timedelta()
     ), "Anticipation cannot be longer than the first timing."
 
+    # Upload the patterns to the DMD
     dmd.frames = [
         polygons_to_mask(pattern, calibration) for pattern in pattern_sequence.patterns
     ]
 
-    if stop_event is not None and stop_event.is_set():
-        return
+    # Schedule the frames to be shown
+    scheduler = sched.scheduler()
 
-    time.sleep(seconds=(timings[0] + delay).total_seconds())
+    for frame_index, timing in zip(pattern_sequence.sequence, pattern_sequence.timings):
+        scheduler.enter(
+            timing.total_seconds(),
+            1,
+            dmd.show_frame,
+            argument=(frame_index,),
+        )
 
-    dmd.show_frame(pattern_sequence.sequence[0])
+    # Allow cancellation of scheduled tasks
+    if stop_event is not None:
+        threading.Thread(
+            target=_cancel_all, args=(stop_event, scheduler), daemon=True
+        ).start()
 
-    if len(timings) == 1:
-        return
+    scheduler.run()
 
-    for frame_index, timing in zip(
-        pattern_sequence.sequence[1:], pattern_sequence.timings[1:]
-    ):
-        if stop_event is not None and stop_event.is_set():
-            return
-        
-        time.sleep(seconds=timing.total_seconds())
-        dmd.show_frame(frame_index)
+
+def _cancel_all(event: threading.Event, scheduler: sched.scheduler):
+    """
+    Cancel all scheduled tasks when the event is set.
+
+    Parameters:
+        event (threading.Event): The event to monitor for cancellation.
+        scheduler (sched.scheduler): The scheduler to cancel tasks from.
+    """
+    event.wait()
+    for task in list(scheduler.queue):
+        try:
+            scheduler.cancel(task)
+        except ValueError:
+            pass

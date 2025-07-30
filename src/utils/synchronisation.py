@@ -7,23 +7,20 @@ Usage:
     # Example cancellable task
     import time
     def blink(event):
-        print("tick")
-        time.sleep(0.5)
+        while not event.is_set():
+            print("Blink!")
+            time.sleep(0.5)
+            if event.is_set():
+                print("Blink cancelled!")
 
     task = CancellableTask(blink)
 
-    srv = NamedPipeServer()
-
-    # Register a dict-style dispatcher so MATLAB can control the task
-    def on_msg(msg):
-        match msg.get("cmd"):
-            case "TASK":
-                return task(msg.get("action"))
-            case _:
-                return {"status": "unknown"}
-
-    srv.callback = on_msg
+    srv = NamedPipeServer(
+        callback=task
+    )
     srv.start()
+    time.sleep(5)
+    srv.stop()
 """
 
 from __future__ import annotations
@@ -180,9 +177,6 @@ class NamedPipeServer:
                         if e.winerror in (109, 232):
                             # broken pipe / no data
                             break
-                        elif e.winerror == 995 and self._stop_event.is_set():
-                            # operation aborted
-                            break
                         else:
                             raise
 
@@ -214,6 +208,7 @@ class NamedPipeServer:
 
             except pywintypes.error as e:
                 if e.winerror == 995 and self._stop_event.is_set():
+                    # operation aborted
                     break
                 raise
 

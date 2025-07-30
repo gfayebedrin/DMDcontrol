@@ -29,7 +29,7 @@ import json, threading, traceback
 from typing import Callable, Optional
 from types import SimpleNamespace
 import ctypes, ctypes.wintypes as wt
-import win32pipe, win32file, pywintypes
+import win32pipe, win32file, pywintypes # type: ignore
 
 
 TASK_MESSAGES = SimpleNamespace(COMMAND_KEY="cmd", START_CMD="start", STOP_CMD="stop")

@@ -45,7 +45,7 @@ def save_pattern_sequence(
 
 def load_pattern_sequence(
     filepath: str,
-) -> tuple[list[list], list[int], list[int]]:
+) -> PatternSequence:
     """
     Load a sequence of patterns from an HDF5 file.
 

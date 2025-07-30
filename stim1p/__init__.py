@@ -10,3 +10,5 @@ from .utils.saving import (
 )
 from .utils.sequence import PatternSequence, play_pattern_sequence
 from .utils.synchronisation import CancellableTask, NamedPipeServer
+
+from .integration import Stim1P

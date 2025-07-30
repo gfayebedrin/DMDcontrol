@@ -67,6 +67,8 @@ def play_pattern_sequence(
         calibration (DMDCalibration): The calibration to use for the upload.
         delay (timedelta): The delay before starting the sequence. Should be negative to anticipate.
     """
+    t0 = datetime.now() + delay
+
     timings = pattern_sequence.timings
 
     assert (
@@ -82,8 +84,8 @@ def play_pattern_sequence(
     scheduler = sched.scheduler()
 
     for frame_index, timing in zip(pattern_sequence.sequence, pattern_sequence.timings):
-        scheduler.enter(
-            timing.total_seconds(),
+        scheduler.enterabs(
+            (t0 + timing).timestamp(),
             1,
             dmd.show_frame,
             argument=(frame_index,),

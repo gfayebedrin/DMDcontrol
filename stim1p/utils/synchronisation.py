@@ -129,9 +129,13 @@ class NamedPipeServer:
         self._pipe: Optional[pywintypes.HANDLE] = None
 
     # ––– public API –––
+    def is_alive(self) -> bool:
+        """Check if the server thread is running."""
+        return self._thread is not None and self._thread.is_alive()
+
     def start(self):
         """Begin listening in a background thread (returns immediately)."""
-        if self._thread is not None and self._thread.is_alive():
+        if self.is_alive():
             raise RuntimeError("Server is already running.")
 
         self._stop_event.clear()
@@ -140,8 +144,6 @@ class NamedPipeServer:
 
     def stop(self):
         """Request shutdown and join the thread."""
-        if self._thread is None:
-            raise RuntimeError("Server is not running.")
 
         self._stop_event.set()
 
@@ -152,7 +154,7 @@ class NamedPipeServer:
             _CancelIoEx(int(self._pipe), None)
             self._pipe = None
 
-        if self._thread.is_alive():
+        if self.is_alive():
             self._thread.join(TIMEOUT)
 
         self._thread = None

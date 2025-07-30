@@ -146,7 +146,7 @@ class NamedPipeServer:
 
         if self._pipe is not None:
             _CancelIoEx(int(self._pipe), None)
-            win32file.CloseHandle(self._pipe)
+            self._pipe = None
 
         if self._thread.is_alive():
             self._thread.join(TIMEOUT)
@@ -177,7 +177,11 @@ class NamedPipeServer:
                     try:
                         hr, raw = win32file.ReadFile(pipe, self.bufsize)
                     except pywintypes.error as e:
-                        if e.winerror in (109, 232):  # broken pipe / no data
+                        if e.winerror in (109, 232):
+                            # broken pipe / no data
+                            break
+                        elif e.winerror == 995 and self._stop_event.is_set():
+                            # operation aborted
                             break
                         else:
                             raise
@@ -208,10 +212,16 @@ class NamedPipeServer:
                     # Send the reply back to the client
                     self._safe_write(pipe, reply)
 
+            except pywintypes.error as e:
+                if e.winerror == 995 and self._stop_event.is_set():
+                    break
+                raise
+
             finally:
                 win32file.CloseHandle(pipe)
                 self._pipe = None
-                time.sleep(SLEEP_TIME)  # avoid busy loop
+
+            time.sleep(SLEEP_TIME)  # avoid busy loop
 
     # helper that never raises back to the listen loop
     def _safe_write(self, pipe, msg):

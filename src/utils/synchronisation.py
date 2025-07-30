@@ -35,14 +35,14 @@ from types import SimpleNamespace
 import win32pipe, win32file, pywintypes
 
 
-MESSAGES = SimpleNamespace(COMMAND_KEY="cmd", START_CMD="start", STOP_CMD="stop")
+TASK_MESSAGES = SimpleNamespace(COMMAND_KEY="cmd", START_CMD="start", STOP_CMD="stop")
 SLEEP_TIME = 0.01  # seconds
-TIMEOUT = 5  # seconds, for pipe connection
+TIMEOUT = 5  # seconds, for pipe connection and task stop
 
 
 class CancellableTask:
     """
-    Run a function in its own thread that can be started and stopped via pipe messages.
+    Run a function in its own thread that can be started and stopped via messages.
     The function should accept a threading.Event parameter to check for cancellation.
     """
 
@@ -63,12 +63,12 @@ class CancellableTask:
         Handle incoming messages to control the task.
         Reacts to messages defined in constant MESSAGES.
         """
-        if MESSAGES.COMMAND_KEY not in message:
+        if TASK_MESSAGES.COMMAND_KEY not in message:
             return {"status": "command_missing"}
-        match message[MESSAGES.COMMAND_KEY]:
-            case MESSAGES.START_CMD:
+        match message[TASK_MESSAGES.COMMAND_KEY]:
+            case TASK_MESSAGES.START_CMD:
                 return self.start()
-            case MESSAGES.STOP_CMD:
+            case TASK_MESSAGES.STOP_CMD:
                 return self.stop()
             case _:
                 return {"status": "command_unknown"}
@@ -133,11 +133,19 @@ class NamedPipeServer:
 
     def stop(self):
         """Request shutdown and join the thread."""
+
         self._stop_event.set()
+
         if isinstance(self.callback, CancellableTask):
             self.callback.stop()
+
         if self._pipe is not None:
+            try:
+                win32file.CancelIoEx(self._pipe, None)
+            except pywintypes.error:
+                pass
             win32file.CloseHandle(self._pipe)
+
         if self._thread.is_alive():
             self._thread.join(TIMEOUT)
 
@@ -156,16 +164,26 @@ class NamedPipeServer:
                 0,
                 None,
             )
+
             try:
                 win32pipe.ConnectNamedPipe(pipe, None)
-                # client loop
+
+                # Wait for messages until the stop event is set
                 while not self._stop_event.is_set():
+
+                    # Read a message from the pipe
                     try:
                         hr, raw = win32file.ReadFile(pipe, self.bufsize)
-                    except pywintypes.error:
-                        break  # client closed or error
+                    except pywintypes.error as e:
+                        if e.winerror in (109, 232):  # broken pipe / no data
+                            break
+                        else:
+                            raise
+
                     if not raw:
                         break
+
+                    # Parse the message as JSON
                     try:
                         message = json.loads(raw.decode("utf-8"))
                     except json.JSONDecodeError as ex:
@@ -173,7 +191,9 @@ class NamedPipeServer:
                         continue
 
                     reply = {"status": "ok"}
-                    if self.callback:
+
+                    # Call the registered callback with the message
+                    if self.callback is not None:
                         try:
                             cb_reply = self.callback(message)
                             if cb_reply is not None:
@@ -182,7 +202,10 @@ class NamedPipeServer:
                             print("Callback exception:", ex)
                             traceback.print_exc()
                             reply = {"error": str(ex)}
+
+                    # Send the reply back to the client
                     self._safe_write(pipe, reply)
+
             finally:
                 win32file.CloseHandle(pipe)
                 self._pipe = None

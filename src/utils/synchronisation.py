@@ -145,7 +145,7 @@ class NamedPipeServer:
             self.callback.stop()
 
         if self._pipe is not None:
-            _CancelIoEx(self._pipe, None)
+            _CancelIoEx(int(self._pipe), None)
             win32file.CloseHandle(self._pipe)
 
         if self._thread.is_alive():

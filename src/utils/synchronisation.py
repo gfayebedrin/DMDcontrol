@@ -125,16 +125,23 @@ class NamedPipeServer:
         self.callback = callback
         self.bufsize = bufsize
         self._stop_event = threading.Event()
-        self._thread = threading.Thread(target=self._listen, daemon=True)
+        self._thread: Optional[threading.Thread] = None
         self._pipe: Optional[pywintypes.HANDLE] = None
 
     # ––– public API –––
     def start(self):
         """Begin listening in a background thread (returns immediately)."""
+        if self._thread is not None and self._thread.is_alive():
+            raise RuntimeError("Server is already running.")
+
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._listen, daemon=True)
         self._thread.start()
 
     def stop(self):
         """Request shutdown and join the thread."""
+        if self._thread is None:
+            raise RuntimeError("Server is not running.")
 
         self._stop_event.set()
 
@@ -147,6 +154,8 @@ class NamedPipeServer:
 
         if self._thread.is_alive():
             self._thread.join(TIMEOUT)
+
+        self._thread = None
 
     # ––– internal –––
     def _listen(self):

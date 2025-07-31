@@ -26,7 +26,7 @@ class Stim1P:
 
     def disconnect_dmd(self):
         if self.dmd is not None:
-            self.dmd.disconnect()
+            self.dmd.free()
             self.dmd = None
 
     def start_listening(self, pipe_name: str = r"\\.\pipe\MatPy"):
@@ -48,7 +48,29 @@ class Stim1P:
         self.pipe_server.start()
 
     def stop_listening(self):
-        if not self.pipe_server.is_alive():
+        if self.pipe_server is None:
             return
         self.pipe_server.stop()
         self.pipe_server = None
+
+    def load_calibration(self, filepath: str):
+        self.calibration = load_calibration(filepath)
+
+    def save_calibration(self, filepath: str):
+        if self.calibration is None:
+            raise RuntimeError("No calibration to save.")
+        save_calibration(filepath, self.calibration)
+
+    def discard_calibration(self):
+        self.calibration = None
+
+    def load_pattern_sequence(self, filepath: str):
+        self.pattern_sequence = load_pattern_sequence(filepath)
+
+    def save_pattern_sequence(self, filepath: str):
+        if self.pattern_sequence is None:
+            raise RuntimeError("No pattern sequence to save.")
+        save_pattern_sequence(filepath, self.pattern_sequence)
+
+    def discard_pattern_sequence(self):
+        self.pattern_sequence = None

@@ -29,10 +29,9 @@ import json, threading, traceback
 from typing import Callable, Optional
 from types import SimpleNamespace
 import ctypes, ctypes.wintypes as wt
-import win32pipe, win32file, pywintypes # type: ignore
+import win32pipe, win32file, pywintypes  # type: ignore
 
 
-TASK_MESSAGES = SimpleNamespace(COMMAND_KEY="cmd", START_CMD="start", STOP_CMD="stop")
 SLEEP_TIME = 0.01  # seconds
 TIMEOUT = 5  # seconds, for pipe connection and task stop
 
@@ -48,7 +47,14 @@ class CancellableTask:
     The function should accept a threading.Event parameter to check for cancellation.
     """
 
-    def __init__(self, func: Callable[[threading.Event], None]):
+    def __init__(
+        self,
+        func: Callable[[threading.Event], None],
+        *,
+        command_key: str = "cmd",
+        start_cmd: str = "start",
+        stop_cmd: str = "stop",
+    ):
         """
         Initialize the task with a function that accepts a threading.Event to check for cancellation.
         The function should run in a loop, checking the event to stop gracefully.
@@ -59,18 +65,21 @@ class CancellableTask:
         self._func = func
         self._thread: Optional[threading.Thread] = None
         self._stop_evt = threading.Event()
+        self._command_key = command_key
+        self._start_cmd = start_cmd
+        self._stop_cmd = stop_cmd
 
     def __call__(self, message: dict) -> dict:
         """
         Handle incoming messages to control the task.
         Reacts to messages defined in constant MESSAGES.
         """
-        if TASK_MESSAGES.COMMAND_KEY not in message:
+        if self._command_key not in message:
             return {"status": "command_missing"}
-        match message[TASK_MESSAGES.COMMAND_KEY]:
-            case TASK_MESSAGES.START_CMD:
+        match message[self._command_key]:
+            case self._start_cmd:
                 return self.start()
-            case TASK_MESSAGES.STOP_CMD:
+            case self._stop_cmd:
                 return self.stop()
             case _:
                 return {"status": "command_unknown"}

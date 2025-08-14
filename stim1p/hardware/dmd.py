@@ -115,3 +115,6 @@ class DMD:
             FrameNumbers=(ctypes.c_ulong * 4096)(frame_index),
         )
         self._alp4.ProjControlEx(ALP4.ALP_FLUT_WRITE_9BIT, ctypes.byref(flut))
+
+
+

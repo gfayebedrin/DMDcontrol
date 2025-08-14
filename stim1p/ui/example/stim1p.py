@@ -43,10 +43,9 @@ class Stim1P:
 
     def disconnect_dmd(self):
         """Disconnect from the DMD hardware."""
-        if self._dmd is None:
-            return
-        self._dmd.free()
-        self._dmd = None
+        if self._dmd is not None:
+            self._dmd.free()
+            self._dmd = None
 
     def start_listening(self, pipe_name: str = r"\\.\pipe\MatPy"):
         """Start the named pipe server to listen for commands.

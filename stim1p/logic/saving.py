@@ -70,8 +70,8 @@ def load_pattern_sequence(
     return PatternSequence(
         patterns=patterns,
         sequence=sequence,
-        timings=[timedelta(milliseconds=t) for t in timings_ms],
-        durations=[timedelta(milliseconds=d) for d in durations_ms]
+        timings=[timedelta(milliseconds=float(t)) for t in timings_ms],
+        durations=[timedelta(milliseconds=float(d)) for d in durations_ms]
     )
 
 

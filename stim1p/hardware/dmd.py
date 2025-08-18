@@ -42,7 +42,7 @@ class DMD:
         return self._alp4.DevInquire(ALP4.ALP_AVAIL_MEMORY)
 
     @property
-    def frames(self) -> npt.NDArray[np.integer]:
+    def frames(self) -> npt.NDArray[np.bool_]:
         """Frames in the device RAM. Defines the images to be displayed.
 
         Three-dimensional boolean array with shape (frames, width, height)."""

@@ -27,7 +27,6 @@ from __future__ import annotations
 import time
 import json, threading, traceback
 from typing import Callable, Optional
-from types import SimpleNamespace
 import ctypes, ctypes.wintypes as wt
 import win32pipe, win32file, pywintypes  # type: ignore
 

@@ -653,13 +653,12 @@ class ALP4(object):
             ct.c_long(LineLoad),
         )
 
-        if dataFormat not in ["Python", "C"]:
-            raise ValueError('dataFormat must be one of "Python" or "C"')
-
         if dataFormat == "Python":
             pImageData = imgData.astype(np.uint8).ctypes.data_as(ct.c_void_p)
         elif dataFormat == "C":
             pImageData = ct.cast(imgData, ct.c_void_p)
+        else:
+            raise ValueError('dataFormat must be one of "Python" or "C"')
 
         self._checkError(
             self._ALPLib.AlpSeqPutEx(self.ALP_ID, SequenceId, LinePutParam, pImageData),
@@ -735,38 +734,38 @@ class ALP4(object):
             "Cannot send image sequence to device.",
         )
 
-    def ImgToBitPlane(self, imgArray, bitShift=0):
-        """
-        Create a bit plane from the imgArray.
-        The bit plane is an (nSizeX x nSizeY / 8) array containing only the bit values
-        corresponding to the bit number bitShift.
-        For a bit depth = 8, 8 bit planes can be extracted from the imgArray by iterating ImgToBitPlane.
+    # def ImgToBitPlane(self, imgArray, bitShift=0):
+    #     """
+    #     Create a bit plane from the imgArray.
+    #     The bit plane is an (nSizeX x nSizeY / 8) array containing only the bit values
+    #     corresponding to the bit number bitShift.
+    #     For a bit depth = 8, 8 bit planes can be extracted from the imgArray by iterating ImgToBitPlane.
 
-        WARNING: It is recommended to directly generate images as bitplanes for better performances.
+    #     WARNING: It is recommended to directly generate images as bitplanes for better performances.
 
-        Usage:
+    #     Usage:
 
-        ImgToBitPlane(imgArray,bitShift = 0)
+    #     ImgToBitPlane(imgArray,bitShift = 0)
 
-        PARAMETERS
-        ----------
+    #     PARAMETERS
+    #     ----------
 
-        imgArray: 1D array or list
-                  An image of the same resolution as the DMD (nSizeX by nSizeY).
+    #     imgArray: 1D array or list
+    #               An image of the same resolution as the DMD (nSizeX by nSizeY).
 
-        bitShift: int, optional
-                  Bit plane to extract form the imgArray (0 to 8),
-                  Has to be <= bit depth.
+    #     bitShift: int, optional
+    #               Bit plane to extract form the imgArray (0 to 8),
+    #               Has to be <= bit depth.
 
-        RETURNS
-        -------
+    #     RETURNS
+    #     -------
 
-        bitPlane: list
-                  Array (nSizeX x nSizeY)/8
+    #     bitPlane: list
+    #               Array (nSizeX x nSizeY)/8
 
 
-        """
-        return img_to_bitplane(imgArray, bitShift)
+    #     """
+    #     return img_to_bitplane(imgArray, bitShift)
 
     def SetTiming(
         self,

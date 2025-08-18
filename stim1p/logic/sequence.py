@@ -4,12 +4,12 @@ Utilities for handling pattern sequences and timing information.
 
 import numpy as np
 from dataclasses import dataclass
-import time, sched, threading
+import sched, threading
 from datetime import timedelta, datetime
 
-from ..hardware import DMD
-from ..utils.calibration import DMDCalibration
-from ..utils.geometry import polygons_to_mask
+# from ..hardware import DMD # TODO put that again in the future
+from ..logic.calibration import DMDCalibration
+from ..logic.geometry import polygons_to_mask
 
 
 @dataclass(frozen=True)
@@ -51,7 +51,7 @@ class PatternSequence:
 
 
 def play_pattern_sequence(
-    dmd: DMD,
+    dmd,# TODO put type hint "DMD",
     pattern_sequence: PatternSequence,
     calibration: DMDCalibration,
     delay: timedelta = timedelta(milliseconds=-500),

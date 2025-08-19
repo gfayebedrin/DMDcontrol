@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 
 ################################################################################
-## Form generated from reading UI file 'DMD_stim.ui'
+## Form generated from reading UI file 'DMD_stimhHMXpQ.ui'
 ##
-## Created by: Qt User Interface Compiler version 6.9.0
+## Created by: Qt User Interface Compiler version 6.9.1
 ##
 ## WARNING! All changes made in this file will be lost when recompiling UI file!
 ################################################################################
@@ -74,6 +74,16 @@ class Ui_widget_dmd_stim(object):
 
         self.horizontalLayout_patternLoading = QHBoxLayout()
         self.horizontalLayout_patternLoading.setObjectName(u"horizontalLayout_patternLoading")
+        self.label_file_path = QLabel(self.verticalLayoutWidget)
+        self.label_file_path.setObjectName(u"label_file_path")
+
+        self.horizontalLayout_patternLoading.addWidget(self.label_file_path)
+
+        self.pushButton_new_file = QPushButton(self.verticalLayoutWidget)
+        self.pushButton_new_file.setObjectName(u"pushButton_new_file")
+
+        self.horizontalLayout_patternLoading.addWidget(self.pushButton_new_file)
+
         self.lineEdit_file_path = QLineEdit(self.verticalLayoutWidget)
         self.lineEdit_file_path.setObjectName(u"lineEdit_file_path")
 
@@ -98,11 +108,8 @@ class Ui_widget_dmd_stim(object):
 
         self.tabWidget = QTabWidget(self.verticalLayoutWidget)
         self.tabWidget.setObjectName(u"tabWidget")
-        sizePolicy1 = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        sizePolicy1.setHorizontalStretch(0)
-        sizePolicy1.setVerticalStretch(0)
-        sizePolicy1.setHeightForWidth(self.tabWidget.sizePolicy().hasHeightForWidth())
-        self.tabWidget.setSizePolicy(sizePolicy1)
+        sizePolicy.setHeightForWidth(self.tabWidget.sizePolicy().hasHeightForWidth())
+        self.tabWidget.setSizePolicy(sizePolicy)
         self.tab_editor = QWidget()
         self.tab_editor.setObjectName(u"tab_editor")
         self.horizontalLayout_13 = QHBoxLayout(self.tab_editor)
@@ -146,11 +153,11 @@ class Ui_widget_dmd_stim(object):
 
         self.pushButton_remove_pattern = QPushButton(self.tab_editor)
         self.pushButton_remove_pattern.setObjectName(u"pushButton_remove_pattern")
-        sizePolicy2 = QSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
-        sizePolicy2.setHorizontalStretch(0)
-        sizePolicy2.setVerticalStretch(0)
-        sizePolicy2.setHeightForWidth(self.pushButton_remove_pattern.sizePolicy().hasHeightForWidth())
-        self.pushButton_remove_pattern.setSizePolicy(sizePolicy2)
+        sizePolicy1 = QSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
+        sizePolicy1.setHorizontalStretch(0)
+        sizePolicy1.setVerticalStretch(0)
+        sizePolicy1.setHeightForWidth(self.pushButton_remove_pattern.sizePolicy().hasHeightForWidth())
+        self.pushButton_remove_pattern.setSizePolicy(sizePolicy1)
         icon3 = QIcon(QIcon.fromTheme(QIcon.ThemeIcon.EditDelete))
         self.pushButton_remove_pattern.setIcon(icon3)
 
@@ -337,6 +344,8 @@ class Ui_widget_dmd_stim(object):
         self.pushButton_calibrate_dmd.setText(QCoreApplication.translate("widget_dmd_stim", u"Calibrate DMD", None))
         self.pushButton_show_grid.setText(QCoreApplication.translate("widget_dmd_stim", u"Show grid", None))
         self.pushButton_define_axis.setText(QCoreApplication.translate("widget_dmd_stim", u"Define Axis", None))
+        self.label_file_path.setText(QCoreApplication.translate("widget_dmd_stim", u"Pattern sequence", None))
+        self.pushButton_new_file.setText(QCoreApplication.translate("widget_dmd_stim", u"New", None))
         self.pushButton_load_patterns.setText(QCoreApplication.translate("widget_dmd_stim", u"Load", None))
 #if QT_CONFIG(shortcut)
         self.pushButton_load_patterns.setShortcut(QCoreApplication.translate("widget_dmd_stim", u"Ctrl+O", None))

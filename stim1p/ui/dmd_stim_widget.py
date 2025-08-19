@@ -31,17 +31,64 @@ class StimDMDWidget(QWidget):
         self.last_roi = None
         self.crosshair = pg.CrosshairROI([0, 0], [20, 20])
         self.dmd = dmd
-        self.model: PatternSequence | None = None
         self._next_pattern_id: int = 0
         self.image_item = pg.ImageView(parent=self, view=pg.PlotItem())
         self.ui.stackedWidget_image.addWidget(self.image_item)
         self.roi_manager = roi_manager.RoiManager(self.image_item)
-        self.roi_manager.polygonEdited.connect(
-            lambda *_: setattr(self, "model", self._get_model_from_ui())
-        )
         self._connect()
         self._console = console.Console(self.ui.plainTextEdit_console_output)
         self._updating_table = False
+
+    @property
+    def model(self) -> PatternSequence:
+        patterns: list[list[np.ndarray]] = []
+        descriptions: list[str] = []
+        for i in range(self.ui.treeWidget.topLevelItemCount()):
+            pattern_item = self.ui.treeWidget.topLevelItem(i)
+            descriptions.append(self._extract_description(pattern_item.text(0)))
+            pattern_polys: list[np.ndarray] = []
+            for j in range(pattern_item.childCount()):
+                poly_item = pattern_item.child(j)
+                poly = self.roi_manager.get_polygon(poly_item)
+                if poly is None:
+                    continue
+                pattern_polys.append(poly.get_points())
+            patterns.append(pattern_polys)
+        timings_ms, durations_ms, sequence = self._read_table_ms()
+        return PatternSequence(
+            patterns=patterns,
+            sequence=sequence,
+            timings=[timedelta(milliseconds=int(t)) for t in timings_ms],
+            durations=[timedelta(milliseconds=int(d)) for d in durations_ms],
+            descriptions=descriptions,
+        )
+
+    @model.setter
+    def model(self, model: PatternSequence):
+        self.ui.treeWidget.clear()
+        self.roi_manager.clear_all()
+        self._next_pattern_id = 0
+        descs = (
+            model.descriptions
+            if model.descriptions is not None
+            else [""] * len(model.patterns)
+        )
+        for pat_idx, pattern in enumerate(model.patterns):
+            root = QTreeWidgetItem(None, [""])
+            self._attach_pattern_id(root, self._new_pattern_id())
+            root.setFlags(root.flags() | Qt.ItemIsEditable)
+            self.ui.treeWidget.insertTopLevelItem(pat_idx, root)
+            self._set_pattern_label(root, pat_idx, descs[pat_idx])
+            for _poly_idx, poly_pts in enumerate(pattern):
+                node = QTreeWidgetItem(None, ["roi"])
+                root.addChild(node)
+                poly = self.roi_manager.register_polygon(
+                    node, np.asarray(poly_pts, dtype=float)
+                )
+                poly.change_ref(self.crosshair.pos(), self.crosshair.angle())
+        self.roi_manager.clear_visible_only()
+        self._renumber_pattern_labels()
+        self._write_table_ms(model)
 
     def _new_pattern_id(self) -> int:
         pid = self._next_pattern_id
@@ -159,7 +206,9 @@ class StimDMDWidget(QWidget):
         self.ui.pushButton_add_roi.clicked.connect(self._add_roi)
         self.ui.pushButton_add_row.clicked.connect(self._add_row_table)
         self.ui.pushButton_remove_row.clicked.connect(self._remove_row_table)
-        self.ui.pushButton_remove_pattern.clicked.connect(self._remove_selected_patterns)
+        self.ui.pushButton_remove_pattern.clicked.connect(
+            self._remove_selected_patterns
+        )
         self.ui.pushButton_load_patterns.clicked.connect(self._load_patterns_file)
         self.ui.pushButton_save_patterns.clicked.connect(self._save_file)
         self.ui.treeWidget.itemClicked.connect(
@@ -174,7 +223,6 @@ class StimDMDWidget(QWidget):
             if idx >= 0:
                 desc = self._extract_description(item.text(col))
                 self._set_pattern_label(item, idx, desc)
-                self.model = self._get_model_from_ui()
                 self._refresh_sequence_descriptions()
 
     def _on_table_item_changed(self, item: QTableWidgetItem):
@@ -254,54 +302,10 @@ class StimDMDWidget(QWidget):
                 self.crosshair.pos(), self.crosshair.angle()
             )
 
-    def _set_ui_from_model(self, model: PatternSequence):
-        self.ui.treeWidget.clear()
-        self.roi_manager.clear_all()
-        self._next_pattern_id = 0
-        descs = model.descriptions if model.descriptions is not None else [""] * len(model.patterns)
-        for pat_idx, pattern in enumerate(model.patterns):
-            root = QTreeWidgetItem(None, [""])
-            self._attach_pattern_id(root, self._new_pattern_id())
-            root.setFlags(root.flags() | Qt.ItemIsEditable)
-            self.ui.treeWidget.insertTopLevelItem(pat_idx, root)
-            self._set_pattern_label(root, pat_idx, descs[pat_idx])
-            for _poly_idx, poly_pts in enumerate(pattern):
-                node = QTreeWidgetItem(None, ["roi"])
-                root.addChild(node)
-                poly = self.roi_manager.register_polygon(
-                    node, np.asarray(poly_pts, dtype=float)
-                )
-                poly.change_ref(self.crosshair.pos(), self.crosshair.angle())
-        self.roi_manager.clear_visible_only()
-        self._renumber_pattern_labels()
-        self._write_table_ms(model)
-
-    def _get_model_from_ui(self) -> PatternSequence:
-        patterns: list[list[np.ndarray]] = []
-        descriptions: list[str] = []
-        for i in range(self.ui.treeWidget.topLevelItemCount()):
-            pattern_item = self.ui.treeWidget.topLevelItem(i)
-            descriptions.append(self._extract_description(pattern_item.text(0)))
-            pattern_polys: list[np.ndarray] = []
-            for j in range(pattern_item.childCount()):
-                poly_item = pattern_item.child(j)
-                poly = self.roi_manager.get_polygon(poly_item)
-                if poly is None:
-                    continue
-                pattern_polys.append(poly.get_points())
-            patterns.append(pattern_polys)
-        timings_ms, durations_ms, sequence = self._read_table_ms()
-        return PatternSequence(
-            patterns=patterns,
-            sequence=sequence,
-            timings=[timedelta(milliseconds=int(t)) for t in timings_ms],
-            durations=[timedelta(milliseconds=int(d)) for d in durations_ms],
-            descriptions=descriptions,
-        )
-
     def _new_model(self):
-        self.model = PatternSequence(patterns=[], sequence=[], timings=[], durations=[], descriptions=[])
-        self._set_ui_from_model(self.model)
+        self.model = PatternSequence(
+            patterns=[], sequence=[], timings=[], durations=[], descriptions=[]
+        )
 
     def _read_table_ms(self):
         timings, durations, sequence = [], [], []
@@ -341,7 +345,6 @@ class StimDMDWidget(QWidget):
         if not file_path:
             return
         self.model = saving.load_pattern_sequence(file_path)
-        self._set_ui_from_model(self.model)
         self.ui.lineEdit_file_path.setText(file_path)
         print(f"Loaded PatternSequence from {file_path}")
 
@@ -352,7 +355,6 @@ class StimDMDWidget(QWidget):
             if not file_path:
                 return
             self.ui.lineEdit_file_path.setText(file_path)
-        self.model = self._get_model_from_ui()
         saving.save_pattern_sequence(file_path, self.model)
         print(f"Saved PatternSequence to {file_path}")
 
@@ -367,7 +369,6 @@ class StimDMDWidget(QWidget):
         root.addChild(node)
         poly = self.roi_manager.register_polygon(node, positions)
         poly.change_ref(self.crosshair.pos(), self.crosshair.angle())
-        self.model = self._get_model_from_ui()
 
     def _add_pattern(self):
         index = self.ui.treeWidget.topLevelItemCount()
@@ -377,7 +378,6 @@ class StimDMDWidget(QWidget):
         self.ui.treeWidget.insertTopLevelItem(index, root)
         self._set_pattern_label(root, index, "")
         self._renumber_pattern_labels()
-        self.model = self._get_model_from_ui()
 
     def _remove_selected_patterns(self):
         items = self.ui.treeWidget.selectedItems()
@@ -392,7 +392,6 @@ class StimDMDWidget(QWidget):
         if leaves:
             self.roi_manager.remove_items(leaves)
         if not patterns:
-            self.model = self._get_model_from_ui()
             return
         old_ids = self._pattern_id_order()
         for item in patterns:
@@ -409,7 +408,9 @@ class StimDMDWidget(QWidget):
                 msg = QMessageBox(self)
                 msg.setIcon(QMessageBox.Warning)
                 msg.setWindowTitle("Pattern is used")
-                msg.setText(f"Pattern #{del_idx} ({desc_cur or 'no description'}) is used {use_count} times in the sequence.")
+                msg.setText(
+                    f"Pattern #{del_idx} ({desc_cur or 'no description'}) is used {use_count} times in the sequence."
+                )
                 remove_btn = msg.addButton("Remove rows", QMessageBox.DestructiveRole)
                 replace_btn = msg.addButton("Replace uses…", QMessageBox.ActionRole)
                 cancel_btn = msg.addButton(QMessageBox.Cancel)
@@ -430,14 +431,19 @@ class StimDMDWidget(QWidget):
                         if not ok or chosen_old_idx not in remaining_old:
                             continue
                         self.ui.treeWidget.takeTopLevelItem(del_idx)
-                        self.roi_manager.remove_items([item] + [item.child(i) for i in range(item.childCount())])
+                        self.roi_manager.remove_items(
+                            [item] + [item.child(i) for i in range(item.childCount())]
+                        )
                         new_ids = self._pattern_id_order()
                         if 0 <= chosen_old_idx < len(old_ids):
                             target_pid = old_ids[chosen_old_idx]
                             if target_pid in new_ids:
                                 target_new_idx = new_ids.index(target_pid)
                                 self._remap_sequence_by_ids(
-                                    old_ids, new_ids, on_deleted="replace", replace_with=target_new_idx
+                                    old_ids,
+                                    new_ids,
+                                    on_deleted="replace",
+                                    replace_with=target_new_idx,
                                 )
                                 self._renumber_pattern_labels()
                                 old_ids = new_ids
@@ -452,24 +458,29 @@ class StimDMDWidget(QWidget):
                     self._refresh_sequence_descriptions()
                 else:
                     self.ui.treeWidget.takeTopLevelItem(del_idx)
-                    self.roi_manager.remove_items([item] + [item.child(i) for i in range(item.childCount())])
+                    self.roi_manager.remove_items(
+                        [item] + [item.child(i) for i in range(item.childCount())]
+                    )
                     new_ids = self._pattern_id_order()
                     self._remap_sequence_by_ids(old_ids, new_ids, on_deleted="drop")
                     self._renumber_pattern_labels()
                     old_ids = new_ids
             else:
                 self.ui.treeWidget.takeTopLevelItem(del_idx)
-                self.roi_manager.remove_items([item] + [item.child(i) for i in range(item.childCount())])
+                self.roi_manager.remove_items(
+                    [item] + [item.child(i) for i in range(item.childCount())]
+                )
                 new_ids = self._pattern_id_order()
                 self._remap_sequence_by_ids(old_ids, new_ids, on_deleted="drop")
                 self._renumber_pattern_labels()
                 old_ids = new_ids
-        self.model = self._get_model_from_ui()
 
     def _add_row_table(self):
         self.ui.tableWidget.insertRow(self.ui.tableWidget.rowCount())
 
     def _remove_row_table(self):
-        rows = sorted({i.row() for i in self.ui.tableWidget.selectedIndexes()}, reverse=True)
+        rows = sorted(
+            {i.row() for i in self.ui.tableWidget.selectedIndexes()}, reverse=True
+        )
         for r in rows:
             self.ui.tableWidget.removeRow(r)

@@ -86,6 +86,20 @@
         <item>
          <layout class="QHBoxLayout" name="horizontalLayout_patternLoading">
           <item>
+           <widget class="QLabel" name="label_file_path">
+            <property name="text">
+             <string>Pattern sequence</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="pushButton_new_file">
+            <property name="text">
+             <string>New</string>
+            </property>
+           </widget>
+          </item>
+          <item>
            <widget class="QLineEdit" name="lineEdit_file_path"/>
           </item>
           <item>
@@ -119,7 +133,7 @@
         <item>
          <widget class="QTabWidget" name="tabWidget">
           <property name="sizePolicy">
-           <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+           <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
             <horstretch>0</horstretch>
             <verstretch>0</verstretch>
            </sizepolicy>

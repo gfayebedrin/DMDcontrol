@@ -27,7 +27,6 @@ function reply = sendPipeMessage(msg, pipePath)
 %     object that re‑uses the stream instead of reconnecting each time.
 %   * Requires MATLAB R2019b+ on Windows with .NET enabled.
 %
-%   © 2025  Lab Pipelines — GPL‑3.0
 %--------------------------------------------------------------------------
 
 if nargin < 2 || isempty(pipePath)

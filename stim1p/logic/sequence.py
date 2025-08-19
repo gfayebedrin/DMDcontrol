@@ -28,15 +28,21 @@ class PatternSequence:
     sequence: list[int]
     timings: list[timedelta]
     durations: list[timedelta]
+    descriptions: list[str] | None = None
 
     def __post_init__(self):
         if not (len(self.sequence) == len(self.timings) == len(self.durations)):
             raise ValueError(
                 "sequence, timings, and durations must all have the same length."
             )
+        
+        if self.descriptions is not None and len(self.descriptions) != len(self.patterns):
+            raise ValueError(
+                "descriptions must have the same length as patterns if provided."
+            )
 
     def __len__(self) -> int:
-        """Return the number of patterns in the sequence."""
+        """Return the length of the sequence."""
         return len(self.sequence)
 
     @property

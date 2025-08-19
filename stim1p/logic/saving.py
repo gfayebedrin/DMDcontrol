@@ -19,10 +19,7 @@ PATTERN = "pattern_{}"
 POLYGON = "polygon_{}"
 
 
-def save_pattern_sequence(
-    filepath: str,
-    pattern_sequence: PatternSequence
-):
+def save_pattern_sequence(filepath: str, pattern_sequence: PatternSequence):
     """
     Save a sequence of patterns to an HDF5 file.
 
@@ -41,6 +38,8 @@ def save_pattern_sequence(
             )
             for j, polygon in enumerate(pattern):
                 pattern_group.create_dataset(POLYGON.format(j), data=polygon)
+            if pattern_sequence.descriptions is not None:
+                pattern_group.attrs["description"] = pattern_sequence.descriptions[i]
 
 
 def load_pattern_sequence(
@@ -60,6 +59,8 @@ def load_pattern_sequence(
         timings_ms = f[TIMINGS][()]
         durations_ms = f[DURATIONS][()]
         patterns = []
+        descriptions = []
+
         for pattern_name in f[PATTERNS]:
             pattern_group = f[PATTERNS][pattern_name]
             pattern = []
@@ -67,11 +68,16 @@ def load_pattern_sequence(
                 polygon = pattern_group[polygon_name][()]
                 pattern.append(polygon)
             patterns.append(pattern)
+
+            if "description" in pattern_group.attrs:
+                descriptions.append(pattern_group.attrs["description"])
+
     return PatternSequence(
         patterns=patterns,
         sequence=sequence,
         timings=[timedelta(milliseconds=float(t)) for t in timings_ms],
-        durations=[timedelta(milliseconds=float(d)) for d in durations_ms]
+        durations=[timedelta(milliseconds=float(d)) for d in durations_ms],
+        descriptions=descriptions if descriptions else None,
     )
 
 

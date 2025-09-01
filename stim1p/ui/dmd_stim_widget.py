@@ -10,8 +10,6 @@ from PySide6.QtWidgets import (
     QWidget,
     QFileDialog,
     QTableWidgetItem,
-    QMessageBox,
-    QInputDialog,
 )
 import pyqtgraph as pg
 
@@ -19,7 +17,7 @@ from ..logic.sequence import PatternSequence
 from ..logic import saving
 
 from .qt.DMD_stim_ui import Ui_widget_dmd_stim
-from . import console, roi_manager
+from . import console, roi_manager, tree_widget_manager
 
 
 class StimDMDWidget(QWidget):
@@ -35,6 +33,7 @@ class StimDMDWidget(QWidget):
         self.image_item = pg.ImageView(parent=self, view=pg.PlotItem())
         self.ui.stackedWidget_image.addWidget(self.image_item)
         self.roi_manager = roi_manager.RoiManager(self.image_item)
+        self.tree_widget_manager = tree_widget_manager.TreeWidgetManager(self)
         self._connect()
         self._console = console.Console(self.ui.plainTextEdit_console_output)
         self._updating_table = False
@@ -45,7 +44,10 @@ class StimDMDWidget(QWidget):
         descriptions: list[str] = []
         for i in range(self.ui.treeWidget.topLevelItemCount()):
             pattern_item = self.ui.treeWidget.topLevelItem(i)
-            descriptions.append(self._extract_description(pattern_item.text(0)))
+            assert pattern_item is not None
+            descriptions.append(
+                self.tree_widget_manager.extract_description(pattern_item.text(0))
+            )
             pattern_polys: list[np.ndarray] = []
             for j in range(pattern_item.childCount()):
                 poly_item = pattern_item.child(j)
@@ -74,127 +76,25 @@ class StimDMDWidget(QWidget):
             else [""] * len(model.patterns)
         )
         for pat_idx, pattern in enumerate(model.patterns):
-            root = QTreeWidgetItem(None, [""])
-            self._attach_pattern_id(root, self._new_pattern_id())
-            root.setFlags(root.flags() | Qt.ItemIsEditable)
+            
+            root = QTreeWidgetItem([""])
+            
+            self.tree_widget_manager.attach_pattern_id(
+                root, self.tree_widget_manager.new_pattern_id()
+            )
+            root.setFlags(root.flags() | Qt.ItemFlag.ItemIsEditable)
             self.ui.treeWidget.insertTopLevelItem(pat_idx, root)
-            self._set_pattern_label(root, pat_idx, descs[pat_idx])
+            self.tree_widget_manager.set_pattern_label(root, pat_idx, descs[pat_idx])
             for _poly_idx, poly_pts in enumerate(pattern):
-                node = QTreeWidgetItem(None, ["roi"])
+                node = QTreeWidgetItem(["roi"])
                 root.addChild(node)
                 poly = self.roi_manager.register_polygon(
                     node, np.asarray(poly_pts, dtype=float)
                 )
                 poly.change_ref(self.crosshair.pos(), self.crosshair.angle())
         self.roi_manager.clear_visible_only()
-        self._renumber_pattern_labels()
+        self.tree_widget_manager.renumber_pattern_labels()
         self._write_table_ms(model)
-
-    def _new_pattern_id(self) -> int:
-        pid = self._next_pattern_id
-        self._next_pattern_id += 1
-        return pid
-
-    def _attach_pattern_id(self, item: QTreeWidgetItem, pid: int) -> None:
-        item.setData(0, Qt.UserRole, int(pid))
-
-    def _pattern_id(self, item: QTreeWidgetItem) -> int:
-        data = item.data(0, Qt.UserRole)
-        return int(data) if data is not None else -1
-
-    def _pattern_id_order(self) -> list[int]:
-        ids = []
-        for i in range(self.ui.treeWidget.topLevelItemCount()):
-            ids.append(self._pattern_id(self.ui.treeWidget.topLevelItem(i)))
-        return ids
-
-    def _extract_description(self, text: str) -> str:
-        s = text.strip()
-        if s.startswith("#"):
-            s = s[1:]
-            while s and s[0].isdigit():
-                s = s[1:]
-            s = s.lstrip(" -:\t")
-        return s
-
-    def _set_pattern_label(self, item: QTreeWidgetItem, index: int, desc: str) -> None:
-        item.setText(0, f"#{index} {desc}".rstrip())
-
-    def _renumber_pattern_labels(self) -> None:
-        for i in range(self.ui.treeWidget.topLevelItemCount()):
-            item = self.ui.treeWidget.topLevelItem(i)
-            desc = self._extract_description(item.text(0))
-            self._set_pattern_label(item, i, desc)
-        self._refresh_sequence_descriptions()
-
-    def _remap_sequence_by_ids(
-        self,
-        old_ids: list[int],
-        new_ids: list[int],
-        *,
-        on_deleted: str = "drop",
-        replace_with: int | None = None,
-    ) -> None:
-        id_to_new_idx = {pid: i for i, pid in enumerate(new_ids)}
-        rows_to_drop = []
-        for r in range(self.ui.tableWidget.rowCount()):
-            idx_item = self.ui.tableWidget.item(r, 2)
-            if not idx_item:
-                continue
-            try:
-                old_idx = int(idx_item.text())
-            except Exception:
-                continue
-            if not (0 <= old_idx < len(old_ids)):
-                continue
-            pid = old_ids[old_idx]
-            if pid in id_to_new_idx:
-                idx_item.setText(str(id_to_new_idx[pid]))
-            else:
-                if on_deleted == "drop":
-                    rows_to_drop.append(r)
-                elif on_deleted == "replace" and replace_with is not None:
-                    idx_item.setText(str(replace_with))
-        for r in sorted(rows_to_drop, reverse=True):
-            self.ui.tableWidget.removeRow(r)
-        self._refresh_sequence_descriptions()
-
-    def _ensure_desc_column(self):
-        tbl = self.ui.tableWidget
-        if tbl.columnCount() < 4:
-            tbl.setColumnCount(4)
-        if not tbl.horizontalHeaderItem(3):
-            tbl.setHorizontalHeaderItem(3, QTableWidgetItem("Description"))
-
-    def _pattern_description_by_index(self, idx: int) -> str:
-        if 0 <= idx < self.ui.treeWidget.topLevelItemCount():
-            item = self.ui.treeWidget.topLevelItem(idx)
-            return self._extract_description(item.text(0))
-        return ""
-
-    def _set_sequence_row_description(self, row: int, pattern_idx: int) -> None:
-        self._ensure_desc_column()
-        desc = self._pattern_description_by_index(pattern_idx)
-        it = self.ui.tableWidget.item(row, 3)
-        if it is None:
-            it = QTableWidgetItem("")
-            self.ui.tableWidget.setItem(row, 3, it)
-        it.setText(desc)
-        it.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
-
-    def _refresh_sequence_descriptions(self):
-        self._updating_table = True
-        rows = self.ui.tableWidget.rowCount()
-        for r in range(rows):
-            idx_item = self.ui.tableWidget.item(r, 2)
-            if not idx_item:
-                continue
-            try:
-                idx = int(idx_item.text())
-            except Exception:
-                continue
-            self._set_sequence_row_description(r, idx)
-        self._updating_table = False
 
     def _connect(self):
         self.ui.pushButton_load_image.clicked.connect(self._load_image)
@@ -202,12 +102,14 @@ class StimDMDWidget(QWidget):
         self.ui.pushButton_refresh_image.clicked.connect(self._refresh_image)
         self.ui.pushButton_show_grid.clicked.connect(self._show_grid)
         self.ui.pushButton_define_axis.clicked.connect(self._define_axis)
-        self.ui.pushButton_add_pattern.clicked.connect(self._add_pattern)
-        self.ui.pushButton_add_roi.clicked.connect(self._add_roi)
+        self.ui.pushButton_add_pattern.clicked.connect(
+            self.tree_widget_manager.add_pattern
+        )
+        self.ui.pushButton_add_roi.clicked.connect(self.tree_widget_manager.add_roi)
         self.ui.pushButton_add_row.clicked.connect(self._add_row_table)
         self.ui.pushButton_remove_row.clicked.connect(self._remove_row_table)
         self.ui.pushButton_remove_pattern.clicked.connect(
-            self._remove_selected_patterns
+            self.tree_widget_manager.remove_selected_patterns
         )
         self.ui.pushButton_load_patterns.clicked.connect(self._load_patterns_file)
         self.ui.pushButton_save_patterns.clicked.connect(self._save_file)
@@ -221,9 +123,9 @@ class StimDMDWidget(QWidget):
         if item.parent() is None:
             idx = self.ui.treeWidget.indexOfTopLevelItem(item)
             if idx >= 0:
-                desc = self._extract_description(item.text(col))
-                self._set_pattern_label(item, idx, desc)
-                self._refresh_sequence_descriptions()
+                desc = self.tree_widget_manager.extract_description(item.text(col))
+                self.tree_widget_manager.set_pattern_label(item, idx, desc)
+                self.tree_widget_manager.refresh_sequence_descriptions()
 
     def _on_table_item_changed(self, item: QTableWidgetItem):
         if self._updating_table:
@@ -233,7 +135,7 @@ class StimDMDWidget(QWidget):
                 idx = int(item.text())
             except Exception:
                 return
-            self._set_sequence_row_description(item.row(), idx)
+            self.tree_widget_manager.set_sequence_row_description(item.row(), idx)
 
     def closeEvent(self, event):
         self._console.restore_original_streams()
@@ -265,7 +167,7 @@ class StimDMDWidget(QWidget):
             if filename == "":
                 filename = "C:\\"
             path = QFileDialog.getExistingDirectory(
-                None, "Select a folder:", filename, QFileDialog.ShowDirsOnly
+                None, "Select a folder:", filename, QFileDialog.Option.ShowDirsOnly
             )
             if path:
                 self.ui.lineEdit_image_folder_path.setText(path)
@@ -291,13 +193,13 @@ class StimDMDWidget(QWidget):
 
     def _show_grid(self):
         show = self.ui.pushButton_show_grid.isChecked()
-        self.image_item.getView().showGrid(show, show)
+        self.image_item.getView().showGrid(show, show) # pyright: ignore[reportAttributeAccessIssue]
 
     def _define_axis(self):
         if self.ui.pushButton_define_axis.isChecked():
-            self.image_item.addItem(self.crosshair)
+            self.image_item.addItem(self.crosshair) # pyright: ignore[reportAttributeAccessIssue]
         else:
-            self.image_item.removeItem(self.crosshair)
+            self.image_item.removeItem(self.crosshair) # pyright: ignore[reportAttributeAccessIssue]
             self.roi_manager.change_reference_all(
                 self.crosshair.pos(), self.crosshair.angle()
             )
@@ -331,13 +233,13 @@ class StimDMDWidget(QWidget):
         d_ms = model.durations_milliseconds
         seq = model.sequence
         self._updating_table = True
-        self._ensure_desc_column()
+        self.tree_widget_manager.ensure_desc_column()
         self.ui.tableWidget.setRowCount(len(seq))
         for r, (t, d, s) in enumerate(zip(t_ms, d_ms, seq)):
             self.ui.tableWidget.setItem(r, 0, QTableWidgetItem(str(int(t))))
             self.ui.tableWidget.setItem(r, 1, QTableWidgetItem(str(int(d))))
             self.ui.tableWidget.setItem(r, 2, QTableWidgetItem(str(int(s))))
-            self._set_sequence_row_description(r, int(s))
+            self.tree_widget_manager.set_sequence_row_description(r, int(s))
         self._updating_table = False
 
     def _load_patterns_file(self):
@@ -357,123 +259,6 @@ class StimDMDWidget(QWidget):
             self.ui.lineEdit_file_path.setText(file_path)
         saving.save_pattern_sequence(file_path, self.model)
         print(f"Saved PatternSequence to {file_path}")
-
-    def _add_roi(self):
-        if not self.ui.treeWidget.selectedItems():
-            return
-        selected = self.ui.treeWidget.selectedItems()[0]
-        root = selected.parent() or selected
-        a = 10
-        positions = np.asarray([[a, a], [-a, a], [-a, -a], [a, -a]], dtype=float)
-        node = QTreeWidgetItem(None, ["roi"])
-        root.addChild(node)
-        poly = self.roi_manager.register_polygon(node, positions)
-        poly.change_ref(self.crosshair.pos(), self.crosshair.angle())
-
-    def _add_pattern(self):
-        index = self.ui.treeWidget.topLevelItemCount()
-        root = QTreeWidgetItem(None, [""])
-        self._attach_pattern_id(root, self._new_pattern_id())
-        root.setFlags(root.flags() | Qt.ItemIsEditable)
-        self.ui.treeWidget.insertTopLevelItem(index, root)
-        self._set_pattern_label(root, index, "")
-        self._renumber_pattern_labels()
-
-    def _remove_selected_patterns(self):
-        items = self.ui.treeWidget.selectedItems()
-        if not items:
-            return
-        patterns = [it for it in items if it.parent() is None]
-        leaves = [it for it in items if it.parent() is not None]
-        for leaf in leaves:
-            parent = leaf.parent()
-            if parent is not None:
-                parent.removeChild(leaf)
-        if leaves:
-            self.roi_manager.remove_items(leaves)
-        if not patterns:
-            return
-        old_ids = self._pattern_id_order()
-        for item in patterns:
-            del_idx = self.ui.treeWidget.indexOfTopLevelItem(item)
-            if del_idx < 0:
-                continue
-            desc_cur = self._extract_description(item.text(0))
-            use_count = 0
-            for r in range(self.ui.tableWidget.rowCount()):
-                it = self.ui.tableWidget.item(r, 2)
-                if it and it.text().isdigit() and int(it.text()) == del_idx:
-                    use_count += 1
-            if use_count:
-                msg = QMessageBox(self)
-                msg.setIcon(QMessageBox.Warning)
-                msg.setWindowTitle("Pattern is used")
-                msg.setText(
-                    f"Pattern #{del_idx} ({desc_cur or 'no description'}) is used {use_count} times in the sequence."
-                )
-                remove_btn = msg.addButton("Remove rows", QMessageBox.DestructiveRole)
-                replace_btn = msg.addButton("Replace uses…", QMessageBox.ActionRole)
-                cancel_btn = msg.addButton(QMessageBox.Cancel)
-                msg.exec()
-                if msg.clickedButton() is cancel_btn:
-                    continue
-                if msg.clickedButton() is replace_btn:
-                    remaining_old = [i for i in range(len(old_ids)) if i != del_idx]
-                    if remaining_old:
-                        chosen_old_idx, ok = QInputDialog.getInt(
-                            self,
-                            "Replace uses",
-                            f"Replace all uses of #{del_idx} with OLD index:",
-                            value=min(remaining_old),
-                            minValue=min(remaining_old),
-                            maxValue=max(remaining_old),
-                        )
-                        if not ok or chosen_old_idx not in remaining_old:
-                            continue
-                        self.ui.treeWidget.takeTopLevelItem(del_idx)
-                        self.roi_manager.remove_items(
-                            [item] + [item.child(i) for i in range(item.childCount())]
-                        )
-                        new_ids = self._pattern_id_order()
-                        if 0 <= chosen_old_idx < len(old_ids):
-                            target_pid = old_ids[chosen_old_idx]
-                            if target_pid in new_ids:
-                                target_new_idx = new_ids.index(target_pid)
-                                self._remap_sequence_by_ids(
-                                    old_ids,
-                                    new_ids,
-                                    on_deleted="replace",
-                                    replace_with=target_new_idx,
-                                )
-                                self._renumber_pattern_labels()
-                                old_ids = new_ids
-                                continue
-                    rows_to_drop = []
-                    for r in range(self.ui.tableWidget.rowCount()):
-                        it = self.ui.tableWidget.item(r, 2)
-                        if it and it.text().isdigit() and int(it.text()) == del_idx:
-                            rows_to_drop.append(r)
-                    for r in sorted(rows_to_drop, reverse=True):
-                        self.ui.tableWidget.removeRow(r)
-                    self._refresh_sequence_descriptions()
-                else:
-                    self.ui.treeWidget.takeTopLevelItem(del_idx)
-                    self.roi_manager.remove_items(
-                        [item] + [item.child(i) for i in range(item.childCount())]
-                    )
-                    new_ids = self._pattern_id_order()
-                    self._remap_sequence_by_ids(old_ids, new_ids, on_deleted="drop")
-                    self._renumber_pattern_labels()
-                    old_ids = new_ids
-            else:
-                self.ui.treeWidget.takeTopLevelItem(del_idx)
-                self.roi_manager.remove_items(
-                    [item] + [item.child(i) for i in range(item.childCount())]
-                )
-                new_ids = self._pattern_id_order()
-                self._remap_sequence_by_ids(old_ids, new_ids, on_deleted="drop")
-                self._renumber_pattern_labels()
-                old_ids = new_ids
 
     def _add_row_table(self):
         self.ui.tableWidget.insertRow(self.ui.tableWidget.rowCount())

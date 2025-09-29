@@ -1,0 +1,13 @@
+name: dmd-control
+channels:
+  - conda-forge
+dependencies:
+  - numpy
+  - pyside6
+  - ca-certificates
+  - openssl
+  - scikit-image
+  - h5py
+  - pyqtgraph
+  - pip
+prefix: /home/ljp/.local/bin/miniforge3/envs/dmd-control

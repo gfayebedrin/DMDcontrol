@@ -17,7 +17,7 @@ from ..logic.sequence import PatternSequence
 from ..logic import saving
 
 from .qt.DMD_stim_ui import Ui_widget_dmd_stim
-from . import console, roi_manager, tree_widget_manager
+from . import console, roi_manager, tree_table_manager
 
 
 class StimDMDWidget(QWidget):
@@ -29,14 +29,13 @@ class StimDMDWidget(QWidget):
         self.last_roi = None
         self.crosshair = pg.CrosshairROI([0, 0], [20, 20])
         self.dmd = dmd
-        self._next_pattern_id: int = 0
         self.image_item = pg.ImageView(parent=self, view=pg.PlotItem())
         self.ui.stackedWidget_image.addWidget(self.image_item)
         self.roi_manager = roi_manager.RoiManager(self.image_item)
-        self.tree_widget_manager = tree_widget_manager.TreeWidgetManager(self)
+        self.tree_manager = tree_table_manager.TreeManager(self)
+        self.table_manager = tree_table_manager.TableManager(self)
         self._connect()
         self._console = console.Console(self.ui.plainTextEdit_console_output)
-        self._updating_table = False
 
     @property
     def model(self) -> PatternSequence:
@@ -46,7 +45,7 @@ class StimDMDWidget(QWidget):
             pattern_item = self.ui.treeWidget.topLevelItem(i)
             assert pattern_item is not None
             descriptions.append(
-                self.tree_widget_manager.extract_description(pattern_item.text(0))
+                tree_table_manager.extract_description(pattern_item.text(0))
             )
             pattern_polys: list[np.ndarray] = []
             for j in range(pattern_item.childCount()):
@@ -79,12 +78,12 @@ class StimDMDWidget(QWidget):
             
             root = QTreeWidgetItem([""])
             
-            self.tree_widget_manager.attach_pattern_id(
-                root, self.tree_widget_manager.new_pattern_id()
+            self.tree_manager.attach_pattern_id(
+                root, self.tree_manager.new_pattern_id()
             )
             root.setFlags(root.flags() | Qt.ItemFlag.ItemIsEditable)
             self.ui.treeWidget.insertTopLevelItem(pat_idx, root)
-            self.tree_widget_manager.set_pattern_label(root, pat_idx, descs[pat_idx])
+            self.tree_manager.set_pattern_label(root, pat_idx, descs[pat_idx])
             for _poly_idx, poly_pts in enumerate(pattern):
                 node = QTreeWidgetItem(["roi"])
                 root.addChild(node)
@@ -93,7 +92,7 @@ class StimDMDWidget(QWidget):
                 )
                 poly.change_ref(self.crosshair.pos(), self.crosshair.angle())
         self.roi_manager.clear_visible_only()
-        self.tree_widget_manager.renumber_pattern_labels()
+        self.tree_manager.renumber_pattern_labels()
         self._write_table_ms(model)
 
     def _connect(self):
@@ -103,39 +102,22 @@ class StimDMDWidget(QWidget):
         self.ui.pushButton_show_grid.clicked.connect(self._show_grid)
         self.ui.pushButton_define_axis.clicked.connect(self._define_axis)
         self.ui.pushButton_add_pattern.clicked.connect(
-            self.tree_widget_manager.add_pattern
+            self.tree_manager.add_pattern
         )
-        self.ui.pushButton_add_roi.clicked.connect(self.tree_widget_manager.add_roi)
+        self.ui.pushButton_add_roi.clicked.connect(self.tree_manager.add_roi)
         self.ui.pushButton_add_row.clicked.connect(self._add_row_table)
         self.ui.pushButton_remove_row.clicked.connect(self._remove_row_table)
         self.ui.pushButton_remove_pattern.clicked.connect(
-            self.tree_widget_manager.remove_selected_patterns
+            self.tree_manager.remove_selected_patterns
         )
+        self.ui.pushButton_new_file.clicked.connect(self._new_model)
         self.ui.pushButton_load_patterns.clicked.connect(self._load_patterns_file)
         self.ui.pushButton_save_patterns.clicked.connect(self._save_file)
         self.ui.treeWidget.itemClicked.connect(
             lambda item, _col: self.roi_manager.show_for_item(item)
         )
-        self.ui.treeWidget.itemChanged.connect(self._on_item_changed)
-        self.ui.tableWidget.itemChanged.connect(self._on_table_item_changed)
-
-    def _on_item_changed(self, item: QTreeWidgetItem, col: int):
-        if item.parent() is None:
-            idx = self.ui.treeWidget.indexOfTopLevelItem(item)
-            if idx >= 0:
-                desc = self.tree_widget_manager.extract_description(item.text(col))
-                self.tree_widget_manager.set_pattern_label(item, idx, desc)
-                self.tree_widget_manager.refresh_sequence_descriptions()
-
-    def _on_table_item_changed(self, item: QTableWidgetItem):
-        if self._updating_table:
-            return
-        if item.column() == 2:
-            try:
-                idx = int(item.text())
-            except Exception:
-                return
-            self.tree_widget_manager.set_sequence_row_description(item.row(), idx)
+        self.ui.treeWidget.itemChanged.connect(self.tree_manager.on_item_changed)
+        self.ui.tableWidget.itemChanged.connect(self.table_manager.on_item_changed)
 
     def closeEvent(self, event):
         self._console.restore_original_streams()
@@ -208,6 +190,7 @@ class StimDMDWidget(QWidget):
         self.model = PatternSequence(
             patterns=[], sequence=[], timings=[], durations=[], descriptions=[]
         )
+        print("Loaded empty PatternSequence")
 
     def _read_table_ms(self):
         timings, durations, sequence = [], [], []
@@ -233,13 +216,13 @@ class StimDMDWidget(QWidget):
         d_ms = model.durations_milliseconds
         seq = model.sequence
         self._updating_table = True
-        self.tree_widget_manager.ensure_desc_column()
+        self.table_manager.ensure_desc_column()
         self.ui.tableWidget.setRowCount(len(seq))
         for r, (t, d, s) in enumerate(zip(t_ms, d_ms, seq)):
             self.ui.tableWidget.setItem(r, 0, QTableWidgetItem(str(int(t))))
             self.ui.tableWidget.setItem(r, 1, QTableWidgetItem(str(int(d))))
             self.ui.tableWidget.setItem(r, 2, QTableWidgetItem(str(int(s))))
-            self.tree_widget_manager.set_sequence_row_description(r, int(s))
+            self.table_manager.set_sequence_row_description(r, int(s))
         self._updating_table = False
 
     def _load_patterns_file(self):

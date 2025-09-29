@@ -103,7 +103,7 @@ class CancellableTask:
             return {"status": "not_running"}
 
         self._stop_evt.set()
-        self._thread.join(TIMEOUT)
+        self._thread.join(TIMEOUT) # pyright: ignore[reportOptionalMemberAccess]
         return {"status": "stopped"}
 
     # ––– internal –––
@@ -134,7 +134,7 @@ class NamedPipeServer:
         self.bufsize = bufsize
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
-        self._pipe: Optional[pywintypes.HANDLE] = None
+        self._pipe: Optional[int] = None
 
     # ––– public API –––
     def is_alive(self) -> bool:
@@ -159,11 +159,11 @@ class NamedPipeServer:
             self.callback.stop()
 
         if self._pipe is not None:
-            _CancelIoEx(int(self._pipe), None)
+            _CancelIoEx(self._pipe, None)
             self._pipe = None
 
         if self.is_alive():
-            self._thread.join(TIMEOUT)
+            self._thread.join(TIMEOUT) # pyright: ignore[reportOptionalMemberAccess]
 
         self._thread = None
 
@@ -180,7 +180,7 @@ class NamedPipeServer:
                 self.bufsize,  # out-buffer
                 self.bufsize,  # in-buffer
                 0,
-                None,
+                None, # pyright: ignore[reportArgumentType]
             )
 
             try:
@@ -189,22 +189,15 @@ class NamedPipeServer:
                 # Wait for messages until the stop event is set
                 while not self._stop_event.is_set():
 
-                    # Read a message from the pipe
-                    try:
-                        hr, raw = win32file.ReadFile(pipe, self.bufsize)
-                    except pywintypes.error as e:
-                        if e.winerror in (109, 232):
-                            # broken pipe / no data
-                            break
-                        else:
-                            raise
+                    hr, raw = win32file.ReadFile(pipe, self.bufsize)
 
                     if not raw:
                         break
 
                     # Parse the message as JSON
                     try:
-                        message = json.loads(raw.decode("utf-8"))
+                        message = json.loads(raw)
+                        # message = json.loads(raw.decode("utf-8"))
                     except json.JSONDecodeError as ex:
                         self._safe_write(pipe, {"error": str(ex)})
                         continue
@@ -226,10 +219,14 @@ class NamedPipeServer:
                     self._safe_write(pipe, reply)
 
             except pywintypes.error as e:
-                if e.winerror == 995 and self._stop_event.is_set():
+                if e.winerror in (109, 232):
+                    # broken pipe / no data
+                    continue
+                elif e.winerror == 995 and self._stop_event.is_set():
                     # operation aborted
                     break
-                raise
+                else:
+                    raise
 
             finally:
                 win32file.CloseHandle(pipe)

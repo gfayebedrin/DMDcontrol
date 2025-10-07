@@ -6,18 +6,64 @@ from datetime import timedelta
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QDialog,
+    QDialogButtonBox,
+    QDoubleSpinBox,
+    QFileDialog,
+    QFormLayout,
+    QMessageBox,
+    QSpinBox,
+    QTableWidgetItem,
     QTreeWidgetItem,
     QWidget,
-    QFileDialog,
-    QTableWidgetItem,
 )
 import pyqtgraph as pg
 
+from ..logic.calibration import (
+    DMDCalibration,
+    compute_calibration_from_square,
+)
 from ..logic.sequence import PatternSequence
 from ..logic import saving
 
 from .qt.DMD_stim_ui import Ui_widget_dmd_stim
 from . import console, roi_manager, tree_table_manager
+
+
+class _CalibrationDialog(QDialog):
+    """Collect user inputs required to build a calibration."""
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setWindowTitle("Calibrate DMD")
+        layout = QFormLayout(self)
+
+        self._mirror_x = QSpinBox(self)
+        self._mirror_x.setRange(1, 8192)
+        self._mirror_x.setValue(100)
+        layout.addRow("Mirrors (X)", self._mirror_x)
+
+        self._mirror_y = QSpinBox(self)
+        self._mirror_y.setRange(1, 8192)
+        self._mirror_y.setValue(100)
+        layout.addRow("Mirrors (Y)", self._mirror_y)
+
+        self._pixel_size = QDoubleSpinBox(self)
+        self._pixel_size.setRange(1e-6, 10_000.0)
+        self._pixel_size.setDecimals(6)
+        self._pixel_size.setValue(1.0)
+        layout.addRow("Camera pixel size (µm)", self._pixel_size)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            parent=self,
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addRow(buttons)
+
+    def values(self) -> tuple[int, int, float]:
+        return self._mirror_x.value(), self._mirror_y.value(), self._pixel_size.value()
 
 
 class StimDMDWidget(QWidget):
@@ -36,9 +82,15 @@ class StimDMDWidget(QWidget):
         self.table_manager = tree_table_manager.TableManager(self)
         self._connect()
         self._console = console.Console(self.ui.plainTextEdit_console_output)
+        self._calibration: DMDCalibration | None = None
+        self._current_image: np.ndarray | None = None
 
     @property
     def model(self) -> PatternSequence:
+        if self._calibration is None:
+            raise RuntimeError(
+                "A DMD calibration must be available before exporting patterns."
+            )
         patterns: list[list[np.ndarray]] = []
         descriptions: list[str] = []
         for i in range(self.ui.treeWidget.topLevelItemCount()):
@@ -53,7 +105,9 @@ class StimDMDWidget(QWidget):
                 poly = self.roi_manager.get_polygon(poly_item)
                 if poly is None:
                     continue
-                pattern_polys.append(poly.get_points())
+                points = poly.get_points()
+                micrometres = self._calibration.camera_to_micrometre(points.T).T
+                pattern_polys.append(micrometres)
             patterns.append(pattern_polys)
         timings_ms, durations_ms, sequence = self._read_table_ms()
         return PatternSequence(
@@ -69,15 +123,22 @@ class StimDMDWidget(QWidget):
         self.ui.treeWidget.clear()
         self.roi_manager.clear_all()
         self._next_pattern_id = 0
+        if (
+            self._calibration is None
+            and any(len(pattern) for pattern in model.patterns)
+        ):
+            raise RuntimeError(
+                "Load or compute a DMD calibration before importing patterns."
+            )
         descs = (
             model.descriptions
             if model.descriptions is not None
             else [""] * len(model.patterns)
         )
         for pat_idx, pattern in enumerate(model.patterns):
-            
+
             root = QTreeWidgetItem([""])
-            
+
             self.tree_manager.attach_pattern_id(
                 root, self.tree_manager.new_pattern_id()
             )
@@ -87,13 +148,22 @@ class StimDMDWidget(QWidget):
             for _poly_idx, poly_pts in enumerate(pattern):
                 node = QTreeWidgetItem(["roi"])
                 root.addChild(node)
-                poly = self.roi_manager.register_polygon(
-                    node, np.asarray(poly_pts, dtype=float)
-                )
+                points = np.asarray(poly_pts, dtype=float)
+                if self._calibration is not None:
+                    points = self._calibration.micrometre_to_camera(points.T).T
+                poly = self.roi_manager.register_polygon(node, points)
                 poly.change_ref(self.crosshair.pos(), self.crosshair.angle())
         self.roi_manager.clear_visible_only()
         self.tree_manager.renumber_pattern_labels()
         self._write_table_ms(model)
+
+    @property
+    def calibration(self) -> DMDCalibration | None:
+        return self._calibration
+
+    @calibration.setter
+    def calibration(self, calibration: DMDCalibration | None):
+        self._calibration = calibration
 
     def _connect(self):
         self.ui.pushButton_load_image.clicked.connect(self._load_image)
@@ -113,6 +183,7 @@ class StimDMDWidget(QWidget):
         self.ui.pushButton_new_file.clicked.connect(self._new_model)
         self.ui.pushButton_load_patterns.clicked.connect(self._load_patterns_file)
         self.ui.pushButton_save_patterns.clicked.connect(self._save_file)
+        self.ui.pushButton_calibrate_dmd.clicked.connect(self._calibrate_dmd)
         self.ui.treeWidget.itemClicked.connect(
             lambda item, _col: self.roi_manager.show_for_item(item)
         )
@@ -132,6 +203,7 @@ class StimDMDWidget(QWidget):
 
     def _set_image(self, image):
         self.image_item.setImage(image.T)
+        self._current_image = image
 
     def _load_image(self, path: str = ""):
         try:
@@ -142,6 +214,79 @@ class StimDMDWidget(QWidget):
             self._set_image(image)
         except Exception:
             pass
+
+    def _select_calibration_points(self) -> np.ndarray | None:
+        items = self.ui.treeWidget.selectedItems()
+        for item in items:
+            poly = self.roi_manager.get_polygon(item)
+            if poly is not None:
+                return poly.get_points()
+        for i in range(self.ui.treeWidget.topLevelItemCount()):
+            pattern_item = self.ui.treeWidget.topLevelItem(i)
+            for j in range(pattern_item.childCount()):
+                child = pattern_item.child(j)
+                poly = self.roi_manager.get_polygon(child)
+                if poly is not None:
+                    return poly.get_points()
+        return None
+
+    def _calibrate_dmd(self):
+        if self._current_image is None:
+            QMessageBox.warning(
+                self,
+                "No image loaded",
+                "Load a calibration image before starting the DMD calibration.",
+            )
+            return
+
+        polygon_points = self._select_calibration_points()
+        if polygon_points is None:
+            QMessageBox.warning(
+                self,
+                "Calibration ROI missing",
+                "Create and select a polygon outlining the calibration square.",
+            )
+            return
+
+        dialog = _CalibrationDialog(self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        mirrors_x, mirrors_y, pixel_size = dialog.values()
+        camera_shape = (
+            int(self._current_image.shape[1]),
+            int(self._current_image.shape[0]),
+        )
+        if self.dmd is not None and hasattr(self.dmd, "shape"):
+            try:
+                dmd_shape = tuple(int(v) for v in self.dmd.shape)
+            except Exception:
+                dmd_shape = (1024, 768)
+        else:
+            dmd_shape = (1024, 768)
+
+        try:
+            calibration = compute_calibration_from_square(
+                polygon_points,
+                (mirrors_x, mirrors_y),
+                pixel_size,
+                camera_shape=camera_shape,
+                dmd_shape=dmd_shape,
+            )
+        except ValueError as exc:
+            QMessageBox.warning(self, "Calibration failed", str(exc))
+            return
+
+        self.calibration = calibration
+        print(
+            "Updated DMD calibration: pixels/mirror=(%.3f, %.3f), µm/mirror=(%.3f, %.3f)"
+            % (
+                calibration.camera_pixels_per_mirror[0],
+                calibration.camera_pixels_per_mirror[1],
+                calibration.micrometers_per_mirror[0],
+                calibration.micrometers_per_mirror[1],
+            )
+        )
 
     def _change_folder(self):
         try:
@@ -229,7 +374,18 @@ class StimDMDWidget(QWidget):
         file_path = QFileDialog.getOpenFileName(self, "Select file", "", "")[0]
         if not file_path:
             return
-        self.model = saving.load_pattern_sequence(file_path)
+        if self._calibration is None:
+            QMessageBox.warning(
+                self,
+                "Calibration required",
+                "Load or compute a DMD calibration before loading patterns.",
+            )
+            return
+        try:
+            self.model = saving.load_pattern_sequence(file_path)
+        except RuntimeError as exc:
+            QMessageBox.warning(self, "Calibration required", str(exc))
+            return
         self.ui.lineEdit_file_path.setText(file_path)
         print(f"Loaded PatternSequence from {file_path}")
 
@@ -240,7 +396,12 @@ class StimDMDWidget(QWidget):
             if not file_path:
                 return
             self.ui.lineEdit_file_path.setText(file_path)
-        saving.save_pattern_sequence(file_path, self.model)
+        try:
+            model = self.model
+        except RuntimeError as exc:
+            QMessageBox.warning(self, "Calibration required", str(exc))
+            return
+        saving.save_pattern_sequence(file_path, model)
         print(f"Saved PatternSequence to {file_path}")
 
     def _add_row_table(self):

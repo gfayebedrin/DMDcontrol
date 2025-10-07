@@ -2,12 +2,15 @@
 Saving and loading utilities for pattern sequences and dmd calibrations.
 """
 
-import h5py
+from dataclasses import asdict, fields
 from datetime import timedelta
+import dataclasses
+import h5py
+import numpy as np
 import numpy.typing as npt
+
 from .calibration import DMDCalibration
 from .sequence import PatternSequence
-from dataclasses import asdict
 
 
 # Constants for HDF5 dataset names
@@ -105,5 +108,33 @@ def load_calibration(filepath: str) -> DMDCalibration:
         calibration (DMDCalibration): The loaded calibration object.
     """
     with h5py.File(filepath, "r") as f:
-        data = {key: f[key][()] for key in f.keys()}
+        stored = {key: f[key][()] for key in f.keys()}
+
+    calibration_fields = {field.name: field for field in fields(DMDCalibration)}
+    data: dict[str, object] = {}
+
+    for key, value in stored.items():
+        if key not in calibration_fields:
+            continue
+        array_value = np.asarray(value)
+        if array_value.shape == ():
+            data[key] = array_value.item()
+        elif array_value.ndim == 1:
+            if np.issubdtype(array_value.dtype, np.integer):
+                data[key] = tuple(int(v) for v in array_value.tolist())
+            else:
+                data[key] = tuple(float(v) for v in array_value.tolist())
+        else:
+            data[key] = array_value
+
+    for field in calibration_fields.values():
+        if field.name in data:
+            continue
+        if field.default is not dataclasses.MISSING:
+            data[field.name] = field.default
+        elif field.default_factory is not dataclasses.MISSING:  # type: ignore[attr-defined]
+            data[field.name] = field.default_factory()  # type: ignore[misc]
+        else:
+            raise KeyError(f"Missing calibration parameter '{field.name}' in file {filepath}.")
+
     return DMDCalibration(**data)

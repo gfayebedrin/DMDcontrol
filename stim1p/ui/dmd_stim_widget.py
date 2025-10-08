@@ -4,18 +4,20 @@ import numpy as np
 from PIL import Image
 from datetime import timedelta
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, QEventLoop, QObject, QPointF, QRectF, Qt
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
+    QHBoxLayout,
     QMessageBox,
     QSpinBox,
     QTableWidgetItem,
     QTreeWidgetItem,
     QWidget,
+    QGraphicsRectItem,
 )
 import pyqtgraph as pg
 
@@ -66,6 +68,112 @@ class _CalibrationDialog(QDialog):
         return self._mirror_x.value(), self._mirror_y.value(), self._pixel_size.value()
 
 
+class _InteractiveRectangleCapture(QObject):
+    """Helper to let the user draw a temporary rectangle on the image view."""
+
+    def __init__(self, view_box: pg.ViewBox, parent: QWidget | None = None):
+        super().__init__(parent)
+        self._view_box = view_box
+        self._scene = view_box.scene()
+        self._rect_item: QGraphicsRectItem | None = None
+        self._loop: QEventLoop | None = None
+        self._dragging = False
+        self._start_view: QPointF | None = None
+        self._result: QRectF | None = None
+        self._original_mouse_enabled: tuple[bool, bool] = (
+            True,
+            True,
+        )
+
+    def exec(self) -> QRectF | None:
+        if self._scene is None:
+            return None
+        self._loop = QEventLoop()
+        self._scene.installEventFilter(self)
+        mouse_enabled = self._view_box.state.get("mouseEnabled", (True, True))
+        self._original_mouse_enabled = (
+            bool(mouse_enabled[0]),
+            bool(mouse_enabled[1]),
+        )
+        self._view_box.setMouseEnabled(False, False)
+        self._loop.exec()
+        self._scene.removeEventFilter(self)
+        self._view_box.setMouseEnabled(*self._original_mouse_enabled)
+        self._cleanup_rect()
+        result = self._result
+        self._result = None
+        self._loop = None
+        return result
+
+    def eventFilter(self, _obj, event):  # noqa: D401 - Qt signature
+        if self._loop is None:
+            return False
+        etype = event.type()
+        if etype == QEvent.GraphicsSceneMousePress:
+            if not self._view_box.sceneBoundingRect().contains(event.scenePos()):
+                return False
+            if event.button() == Qt.MouseButton.LeftButton:
+                self._dragging = True
+                self._start_view = self._view_box.mapSceneToView(event.scenePos())
+                if self._rect_item is None:
+                    self._rect_item = QGraphicsRectItem()
+                    self._rect_item.setPen(
+                        pg.mkPen(color="yellow", width=2, style=Qt.PenStyle.DashLine)
+                    )
+                    self._rect_item.setZValue(10_000)
+                    self._view_box.addItem(self._rect_item)
+                self._rect_item.setRect(
+                    QRectF(self._start_view, self._start_view).normalized()
+                )
+                event.accept()
+                return True
+            if event.button() == Qt.MouseButton.RightButton:
+                self._finish(None)
+                event.accept()
+                return True
+        elif etype == QEvent.GraphicsSceneMouseMove:
+            if not self._dragging or self._start_view is None:
+                return False
+            current_view = self._view_box.mapSceneToView(event.scenePos())
+            rect = QRectF(self._start_view, current_view).normalized()
+            if self._rect_item is not None:
+                self._rect_item.setRect(rect)
+            event.accept()
+            return True
+        elif etype == QEvent.GraphicsSceneMouseRelease:
+            if not self._dragging or event.button() != Qt.MouseButton.LeftButton:
+                return False
+            self._dragging = False
+            if self._start_view is None:
+                self._finish(None)
+                event.accept()
+                return True
+            current_view = self._view_box.mapSceneToView(event.scenePos())
+            rect = QRectF(self._start_view, current_view).normalized()
+            if rect.width() <= 0.0 or rect.height() <= 0.0:
+                self._finish(None)
+            else:
+                self._finish(rect)
+            event.accept()
+            return True
+        elif etype == QEvent.KeyPress and event.key() == Qt.Key.Key_Escape:
+            self._finish(None)
+            event.accept()
+            return True
+        return False
+
+    def _finish(self, rect: QRectF | None) -> None:
+        self._result = rect
+        self._dragging = False
+        self._start_view = None
+        if self._loop is not None and self._loop.isRunning():
+            self._loop.quit()
+
+    def _cleanup_rect(self) -> None:
+        if self._rect_item is not None:
+            self._view_box.removeItem(self._rect_item)
+            self._rect_item = None
+
 class StimDMDWidget(QWidget):
     def __init__(self, name="Stimulation DMD Widget", dmd=None, parent=None):
         super().__init__(parent=parent)
@@ -75,9 +183,43 @@ class StimDMDWidget(QWidget):
         self.last_roi = None
         self.crosshair = pg.CrosshairROI([0, 0], [20, 20])
         self.dmd = dmd
-        self.image_item = pg.ImageView(parent=self, view=pg.PlotItem())
-        self.ui.stackedWidget_image.addWidget(self.image_item)
-        self.roi_manager = roi_manager.RoiManager(self.image_item)
+        # GraphicsLayoutWidget gives us fine control over plot + histogram layout.
+        self._graphics_widget = pg.GraphicsLayoutWidget(parent=self)
+        self._plot_item = self._graphics_widget.addPlot()
+        self._view_box = self._plot_item.getViewBox()
+        # Normalise the plot behaviour: no padding, camera-style orientation.
+        if hasattr(self._view_box, "setPadding"):
+            self._view_box.setPadding(0.0)
+        elif hasattr(self._view_box, "setDefaultPadding"):
+            self._view_box.setDefaultPadding(0.0)
+        self._view_box.setAspectLocked(False)
+        self._view_box.invertY(True)
+        self._view_box.setMouseEnabled(True, True)
+        self._view_box.enableAutoRange(pg.ViewBox.XYAxes, enable=True)
+        self._view_box.setLimits(xMin=0.0, yMin=0.0)
+
+        # ImageItem renders the camera frame; keep it behind ROIs.
+        self._image_item = pg.ImageItem()
+        self._image_item.setZValue(-1)
+        # Attach image directly to the view box so it follows pans/zooms.
+        self._view_box.addItem(self._image_item)
+
+        # HistogramLUTWidget provides the contrast controls that users expect.
+        self._hist_widget = pg.HistogramLUTWidget(parent=self)
+        self._hist_widget.setImageItem(self._image_item)
+        self._hist_widget.setMinimumWidth(140)
+        self._current_levels: tuple[float, float] | None = None
+        self._hist_widget.region.sigRegionChanged.connect(self._store_histogram_levels)
+
+        self._image_container = QWidget(parent=self)
+        container_layout = QHBoxLayout(self._image_container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(6)
+        container_layout.addWidget(self._graphics_widget, 1)
+        container_layout.addWidget(self._hist_widget, 0)
+
+        self.ui.stackedWidget_image.addWidget(self._image_container)
+        self.roi_manager = roi_manager.RoiManager(self._plot_item)
         self.tree_manager = tree_table_manager.TreeManager(self)
         self.table_manager = tree_table_manager.TableManager(self)
         self._connect()
@@ -201,9 +343,65 @@ class StimDMDWidget(QWidget):
     def set_up(self):
         pass
 
-    def _set_image(self, image):
-        self.image_item.setImage(image.T)
+    def _get_view_box(self) -> pg.ViewBox:
+        return self._view_box
+
+    def _set_image(self, image: np.ndarray) -> None:
+        image = np.asarray(image)
+        if image.ndim not in (2, 3):
+            raise ValueError("Images must be 2D grayscale or 3-channel colour arrays.")
+        height, width = image.shape[:2]
+        previous_levels = self._current_levels
+
+        view_box = self._get_view_box()
+        try:
+            previous_range = view_box.viewRange()
+        except Exception:
+            previous_range = None
+
+        # ImageView expects column-major data; transpose so axes remain aligned.
+        display_image = (
+            image.T if image.ndim == 2 else np.transpose(image, axes=(1, 0, 2))
+        )
+        auto_levels = self._image_item.image is None or previous_levels is None
+        levels = None if auto_levels else previous_levels
+        self._image_item.setImage(
+            display_image,
+            autoLevels=auto_levels,
+            autoDownsample=False,
+            levels=levels,
+        )
+        self._image_item.setRect(QRectF(0.0, 0.0, float(width), float(height)))
+        self._image_item.setPos(0.0, 0.0)
+        if levels is None:
+            self._store_histogram_levels()
+        else:
+            self._hist_widget.region.setRegion(levels)
+
+        self._view_box.enableAutoRange(pg.ViewBox.XYAxes, enable=False)
+        self._view_box.setLimits(
+            xMin=0.0,
+            yMin=0.0,
+            xMax=float(width),
+            yMax=float(height),
+        )
+        if previous_range is not None:
+            x_range, y_range = previous_range
+            self._view_box.setRange(xRange=x_range, yRange=y_range, padding=0.0)
+        else:
+            self._view_box.setRange(
+                xRange=(0.0, float(width)),
+                yRange=(0.0, float(height)),
+                padding=0.0,
+            )
         self._current_image = image
+
+    def _store_histogram_levels(self) -> None:
+        try:
+            low, high = self._hist_widget.region.getRegion()
+            self._current_levels = (float(low), float(high))
+        except Exception:
+            self._current_levels = None
 
     def _load_image(self, path: str = ""):
         try:
@@ -215,47 +413,57 @@ class StimDMDWidget(QWidget):
         except Exception:
             pass
 
-    def _select_calibration_points(self) -> np.ndarray | None:
-        items = self.ui.treeWidget.selectedItems()
-        for item in items:
-            poly = self.roi_manager.get_polygon(item)
-            if poly is not None:
-                return poly.get_points()
-        for i in range(self.ui.treeWidget.topLevelItemCount()):
-            pattern_item = self.ui.treeWidget.topLevelItem(i)
-            for j in range(pattern_item.childCount()):
-                child = pattern_item.child(j)
-                poly = self.roi_manager.get_polygon(child)
-                if poly is not None:
-                    return poly.get_points()
-        return None
-
     def _calibrate_dmd(self):
-        if self._current_image is None:
+        initial_dir = self.ui.lineEdit_image_folder_path.text().strip()
+        file_filter = (
+            "Image files (*.png *.jpg *.jpeg *.tif *.tiff *.gif);;All files (*)"
+        )
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select calibration image",
+            initial_dir if initial_dir else "",
+            file_filter,
+        )
+        if not file_path:
+            return
+        try:
+            with Image.open(file_path) as pil_image:
+                calibration_image = np.array(pil_image)
+        except Exception as exc:
             QMessageBox.warning(
                 self,
-                "No image loaded",
-                "Load a calibration image before starting the DMD calibration.",
+                "Calibration image error",
+                f"Unable to load calibration image:\n{exc}",
             )
             return
 
-        polygon_points = self._select_calibration_points()
+        previous_image = self._current_image
+        previous_view = self._capture_view_state()
+        selected_items = self.ui.treeWidget.selectedItems()
+        selected_item = selected_items[0] if selected_items else None
+        self.roi_manager.clear_visible_only()
+
+        self._set_image(calibration_image)
+
+        polygon_points = self._prompt_calibration_rectangle()
         if polygon_points is None:
-            QMessageBox.warning(
+            QMessageBox.information(
                 self,
-                "Calibration ROI missing",
-                "Create and select a polygon outlining the calibration square.",
+                "Calibration cancelled",
+                "No calibration rectangle was drawn. Calibration has been cancelled.",
             )
+            self._restore_after_calibration(previous_image, previous_view, selected_item)
             return
 
         dialog = _CalibrationDialog(self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
+            self._restore_after_calibration(previous_image, previous_view, selected_item)
             return
 
         mirrors_x, mirrors_y, pixel_size = dialog.values()
         camera_shape = (
-            int(self._current_image.shape[1]),
-            int(self._current_image.shape[0]),
+            int(calibration_image.shape[1]),
+            int(calibration_image.shape[0]),
         )
         if self.dmd is not None and hasattr(self.dmd, "shape"):
             try:
@@ -275,6 +483,7 @@ class StimDMDWidget(QWidget):
             )
         except ValueError as exc:
             QMessageBox.warning(self, "Calibration failed", str(exc))
+            self._restore_after_calibration(previous_image, previous_view, selected_item)
             return
 
         self.calibration = calibration
@@ -287,6 +496,67 @@ class StimDMDWidget(QWidget):
                 calibration.micrometers_per_mirror[1],
             )
         )
+        self._restore_after_calibration(previous_image, previous_view, selected_item)
+
+    def _prompt_calibration_rectangle(self) -> np.ndarray | None:
+        prompt = QMessageBox(self)
+        prompt.setWindowTitle("Select calibration square")
+        prompt.setIcon(QMessageBox.Icon.Information)
+        prompt.setText("Draw a rectangle around the calibration square.")
+        prompt.setInformativeText(
+            "Left-click and drag to draw. Right-click or press Esc to cancel."
+        )
+        prompt.setStandardButtons(
+            QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Ok
+        )
+        if prompt.exec() != QMessageBox.StandardButton.Ok:
+            return None
+
+        capture = _InteractiveRectangleCapture(self._get_view_box(), self)
+        rect = capture.exec()
+        if rect is None or rect.width() <= 0.0 or rect.height() <= 0.0:
+            return None
+        x0, x1 = rect.left(), rect.right()
+        y0, y1 = rect.top(), rect.bottom()
+        return np.array(
+            [[x0, y0], [x1, y0], [x1, y1], [x0, y1]],
+            dtype=float,
+        )
+
+    def _capture_view_state(
+        self,
+    ) -> tuple[tuple[float, float], tuple[float, float]] | None:
+        view = self._get_view_box()
+        try:
+            x_range, y_range = view.viewRange()
+        except Exception:
+            return None
+        return (tuple(x_range), tuple(y_range))
+
+    def _restore_after_calibration(
+        self,
+        previous_image: np.ndarray | None,
+        previous_view_range: tuple[tuple[float, float], tuple[float, float]] | None,
+        selected_item: QTreeWidgetItem | None,
+    ) -> None:
+        if previous_image is not None:
+            self._set_image(previous_image)
+            if previous_view_range is not None:
+                x_range, y_range = previous_view_range
+                self._get_view_box().setRange(
+                    xRange=x_range,
+                    yRange=y_range,
+                    padding=0.0,
+                )
+        else:
+            self._image_item.clear()
+            self._current_levels = None
+            self._current_image = None
+
+        if selected_item is not None:
+            self.roi_manager.show_for_item(selected_item)
+        else:
+            self.roi_manager.clear_visible_only()
 
     def _change_folder(self):
         try:
@@ -320,13 +590,13 @@ class StimDMDWidget(QWidget):
 
     def _show_grid(self):
         show = self.ui.pushButton_show_grid.isChecked()
-        self.image_item.getView().showGrid(show, show) # pyright: ignore[reportAttributeAccessIssue]
+        self._plot_item.showGrid(show, show)
 
     def _define_axis(self):
         if self.ui.pushButton_define_axis.isChecked():
-            self.image_item.addItem(self.crosshair) # pyright: ignore[reportAttributeAccessIssue]
+            self._plot_item.addItem(self.crosshair)
         else:
-            self.image_item.removeItem(self.crosshair) # pyright: ignore[reportAttributeAccessIssue]
+            self._plot_item.removeItem(self.crosshair)
             self.roi_manager.change_reference_all(
                 self.crosshair.pos(), self.crosshair.angle()
             )

@@ -37,7 +37,7 @@ class RoiManager(QObject):
     visibilityChanged = Signal()
     polygonEdited = Signal(QTreeWidgetItem)
 
-    def __init__(self, image_view: pg.ImageView):
+    def __init__(self, image_view: pg.GraphicsItem):
         super().__init__()
         self._image_view = image_view
         self._polygons: dict[QTreeWidgetItem, Polygon] = {}

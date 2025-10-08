@@ -195,6 +195,117 @@ class _InteractiveRectangleCapture(QObject):
             self._rect_item = None
 
 
+class _PolygonDrawingCapture(QObject):
+    """Interactive tool to capture a polygon drawn via successive clicks."""
+
+    def __init__(self, view_box: pg.ViewBox, parent: QWidget | None = None):
+        super().__init__(parent)
+        self._view_box = view_box
+        self._scene = view_box.scene()
+        self._loop: QEventLoop | None = None
+        self._points: list[QPointF] = []
+        self._preview: pg.PlotDataItem | None = None
+        self._result: list[QPointF] | None = None
+        self._original_mouse_enabled: tuple[bool, bool] = (True, True)
+
+    def exec(self) -> list[QPointF] | None:
+        if self._scene is None:
+            return None
+        self._loop = QEventLoop()
+        self._scene.installEventFilter(self)
+        mouse_enabled = self._view_box.state.get("mouseEnabled", (True, True))
+        self._original_mouse_enabled = (
+            bool(mouse_enabled[0]),
+            bool(mouse_enabled[1]),
+        )
+        self._view_box.setMouseEnabled(False, False)
+        self._loop.exec()
+        self._scene.removeEventFilter(self)
+        self._view_box.setMouseEnabled(*self._original_mouse_enabled)
+        self._cleanup_preview()
+        points = self._result
+        self._points.clear()
+        self._result = None
+        self._loop = None
+        return points
+
+    def eventFilter(self, _obj, event):  # noqa: D401
+        if self._loop is None:
+            return False
+        etype = event.type()
+        if etype == QEvent.GraphicsSceneMousePress:
+            if not self._view_box.sceneBoundingRect().contains(event.scenePos()):
+                return False
+            if event.button() == Qt.MouseButton.LeftButton:
+                self._append_point(event.scenePos())
+                event.accept()
+                return True
+            if event.button() == Qt.MouseButton.RightButton:
+                self._finish(commit=True)
+                event.accept()
+                return True
+        elif etype == QEvent.GraphicsSceneMouseDoubleClick:
+            if event.button() == Qt.MouseButton.LeftButton:
+                self._finish(commit=True)
+                event.accept()
+                return True
+        elif etype == QEvent.GraphicsSceneMouseMove:
+            if not self._points:
+                return False
+            current_view = self._view_box.mapSceneToView(event.scenePos())
+            self._update_preview(current_view)
+            event.accept()
+            return True
+        elif etype == QEvent.KeyPress and event.key() == Qt.Key.Key_Escape:
+            self._finish(commit=False)
+            event.accept()
+            return True
+        return False
+
+    def _append_point(self, scene_pos: QPointF) -> None:
+        view_point = self._view_box.mapSceneToView(scene_pos)
+        self._points.append(view_point)
+        self._update_preview(current=None)
+
+    def _update_preview(self, current: QPointF | None) -> None:
+        if self._preview is None:
+            pen = pg.mkPen(color="yellow", width=2)
+            self._preview = pg.PlotDataItem(
+                pen=pen,
+                symbol="o",
+                symbolBrush="yellow",
+                symbolPen="yellow",
+                symbolSize=6,
+            )
+            self._preview.setZValue(10_000)
+            self._view_box.addItem(self._preview)
+        xs = [pt.x() for pt in self._points]
+        ys = [pt.y() for pt in self._points]
+        if current is not None:
+            xs.append(current.x())
+            ys.append(current.y())
+        elif len(self._points) >= 2:
+            xs.append(self._points[0].x())
+            ys.append(self._points[0].y())
+        self._preview.setData(xs, ys)
+
+    def _finish(self, commit: bool) -> None:
+        if commit and len(self._points) >= 3:
+            self._result = [QPointF(pt) for pt in self._points]
+        else:
+            self._result = None
+        if self._loop is not None and self._loop.isRunning():
+            self._loop.quit()
+
+    def _cleanup_preview(self) -> None:
+        if self._preview is not None:
+            try:
+                self._view_box.removeItem(self._preview)
+            except Exception:
+                pass
+            self._preview = None
+
+
 class _CalibrationPreferences:
     """Small helper around QSettings for persisting calibration parameters."""
 
@@ -330,6 +441,7 @@ class StimDMDWidget(QWidget):
             )
         patterns: list[list[np.ndarray]] = []
         descriptions: list[str] = []
+        shape_types: list[list[str]] = []
         for i in range(self.ui.treeWidget.topLevelItemCount()):
             pattern_item = self.ui.treeWidget.topLevelItem(i)
             assert pattern_item is not None
@@ -337,15 +449,18 @@ class StimDMDWidget(QWidget):
                 tree_table_manager.extract_description(pattern_item.text(0))
             )
             pattern_polys: list[np.ndarray] = []
+            pattern_shapes: list[str] = []
             for j in range(pattern_item.childCount()):
                 poly_item = pattern_item.child(j)
-                poly = self.roi_manager.get_polygon(poly_item)
-                if poly is None:
+                shape = self.roi_manager.get_shape(poly_item)
+                if shape is None:
                     continue
-                points = poly.get_points()
+                points = shape.get_points()
                 micrometres = self._calibration.camera_to_micrometre(points.T).T
                 pattern_polys.append(micrometres)
+                pattern_shapes.append(shape.shape_type)
             patterns.append(pattern_polys)
+            shape_types.append(pattern_shapes)
         timings_ms, durations_ms, sequence = self._read_table_ms()
         return PatternSequence(
             patterns=patterns,
@@ -353,6 +468,7 @@ class StimDMDWidget(QWidget):
             timings=[timedelta(milliseconds=int(t)) for t in timings_ms],
             durations=[timedelta(milliseconds=int(d)) for d in durations_ms],
             descriptions=descriptions,
+            shape_types=shape_types,
         )
 
     @model.setter
@@ -372,6 +488,11 @@ class StimDMDWidget(QWidget):
             if model.descriptions is not None
             else [""] * len(model.patterns)
         )
+        shape_types = (
+            model.shape_types
+            if model.shape_types is not None
+            else [["polygon"] * len(pattern) for pattern in model.patterns]
+        )
         for pat_idx, pattern in enumerate(model.patterns):
 
             root = QTreeWidgetItem([""])
@@ -382,14 +503,28 @@ class StimDMDWidget(QWidget):
             root.setFlags(root.flags() | Qt.ItemFlag.ItemIsEditable)
             self.ui.treeWidget.insertTopLevelItem(pat_idx, root)
             self.tree_manager.set_pattern_label(root, pat_idx, descs[pat_idx])
+            shape_type_row = (
+                shape_types[pat_idx]
+                if pat_idx < len(shape_types)
+                else ["polygon"] * len(pattern)
+            )
             for _poly_idx, poly_pts in enumerate(pattern):
-                node = QTreeWidgetItem(["roi"])
+                shape_kind = (
+                    shape_type_row[_poly_idx]
+                    if _poly_idx < len(shape_type_row)
+                    else "polygon"
+                )
+                shape_kind = str(shape_kind).lower()
+                node = QTreeWidgetItem([shape_kind])
                 root.addChild(node)
                 points = np.asarray(poly_pts, dtype=float)
                 if self._calibration is not None:
                     points = self._calibration.micrometre_to_camera(points.T).T
-                poly = self.roi_manager.register_polygon(node, points)
-                poly.change_ref(self.crosshair.pos(), self.crosshair.angle())
+                if shape_kind == "rectangle":
+                    shape = self.roi_manager.register_rectangle(node, points)
+                else:
+                    shape = self.roi_manager.register_polygon(node, points)
+                shape.change_ref(self.crosshair.pos(), self.crosshair.angle())
         self.roi_manager.clear_visible_only()
         self.tree_manager.renumber_pattern_labels()
         self._write_table_ms(model)
@@ -411,7 +546,8 @@ class StimDMDWidget(QWidget):
         self.ui.pushButton_add_pattern.clicked.connect(
             self.tree_manager.add_pattern
         )
-        self.ui.pushButton_add_roi.clicked.connect(self.tree_manager.add_roi)
+        self.ui.pushButton_draw_rectangle.clicked.connect(self._draw_rectangle_roi)
+        self.ui.pushButton_draw_polygon.clicked.connect(self._draw_polygon_roi)
         self.ui.pushButton_add_row.clicked.connect(self._add_row_table)
         self.ui.pushButton_remove_row.clicked.connect(self._remove_row_table)
         self.ui.pushButton_remove_pattern.clicked.connect(
@@ -550,6 +686,91 @@ class StimDMDWidget(QWidget):
         QTimer.singleShot(
             0, lambda: view_box.setRange(rect=QRectF(fit_rect), padding=0.0)
         )
+
+    def _resolve_pattern_parent(self) -> QTreeWidgetItem | None:
+        tree = self.ui.treeWidget
+        selected_items = tree.selectedItems()
+        target = selected_items[0] if selected_items else None
+        if target is None:
+            if tree.topLevelItemCount() == 0:
+                QMessageBox.information(
+                    self,
+                    "No pattern selected",
+                    "Create or select a pattern before drawing a shape.",
+                )
+                return None
+            target = tree.topLevelItem(0)
+            if target is not None:
+                tree.setCurrentItem(target)
+        if target is None:
+            return None
+        if target.parent() is not None:
+            target = target.parent()
+        return target
+
+    def _create_roi_item(
+        self,
+        parent_item: QTreeWidgetItem,
+        points: np.ndarray,
+        shape_type: str,
+    ) -> QTreeWidgetItem:
+        points = np.asarray(points, dtype=float)
+        if points.ndim != 2 or points.shape[1] != 2:
+            raise ValueError("ROI points must be an array of shape (N, 2).")
+        shape_type = str(shape_type).lower()
+        label = "rectangle" if shape_type == "rectangle" else "polygon"
+        node = QTreeWidgetItem([label])
+        parent_item.addChild(node)
+        if shape_type == "rectangle":
+            shape = self.roi_manager.register_rectangle(node, points)
+        else:
+            shape = self.roi_manager.register_polygon(node, points)
+        shape.change_ref(self.crosshair.pos(), self.crosshair.angle())
+        parent_item.setExpanded(True)
+        self.ui.treeWidget.setCurrentItem(node)
+        self.roi_manager.show_for_item(node)
+        return node
+
+    def _draw_rectangle_roi(self) -> None:
+        parent_item = self._resolve_pattern_parent()
+        if parent_item is None:
+            return
+        print("Rectangle tool: drag to draw. Right-click or Esc cancels.")
+        button = self.ui.pushButton_draw_rectangle
+        button.setEnabled(False)
+        try:
+            capture = _InteractiveRectangleCapture(self._get_view_box(), self)
+            rect = capture.exec()
+        finally:
+            button.setEnabled(True)
+        if rect is None or rect.width() <= 0.0 or rect.height() <= 0.0:
+            return
+        x0, x1 = rect.left(), rect.right()
+        y0, y1 = rect.top(), rect.bottom()
+        points = np.array(
+            [[x0, y0], [x1, y0], [x1, y1], [x0, y1]],
+            dtype=float,
+        )
+        self._create_roi_item(parent_item, points, "rectangle")
+
+    def _draw_polygon_roi(self) -> None:
+        parent_item = self._resolve_pattern_parent()
+        if parent_item is None:
+            return
+        print(
+            "Polygon tool: left-click to add vertices, right-click or double-click to finish (Esc cancels)."
+        )
+        button = self.ui.pushButton_draw_polygon
+        button.setEnabled(False)
+        try:
+            capture = _PolygonDrawingCapture(self._get_view_box(), self)
+            points = capture.exec()
+        finally:
+            button.setEnabled(True)
+        if not points or len(points) < 3:
+            return
+        array = np.array([[pt.x(), pt.y()] for pt in points], dtype=float)
+        self._create_roi_item(parent_item, array, "polygon")
 
     def _reset_image_view(self) -> None:
         if self._current_image is None:

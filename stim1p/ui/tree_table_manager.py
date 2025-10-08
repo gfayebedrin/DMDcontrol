@@ -7,8 +7,6 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QTableWidgetItem,
 )
-import pyqtgraph as pg
-import numpy as np
 
 from typing import TYPE_CHECKING, TypeVar
 
@@ -88,18 +86,6 @@ class TreeManager:
                 self.widget.table_manager.refresh_sequence_descriptions()
 
     # Actions
-
-    def add_roi(self):
-        if not self.widget.ui.treeWidget.selectedItems():
-            return
-        selected = self.widget.ui.treeWidget.selectedItems()[0]
-        root = selected.parent() or selected
-        a = 10
-        positions = np.asarray([[a, a], [-a, a], [-a, -a], [a, -a]], dtype=float)
-        node = QTreeWidgetItem(["roi"])
-        root.addChild(node)
-        poly = self.widget.roi_manager.register_polygon(node, positions)
-        poly.change_ref(self.widget.crosshair.pos(), self.widget.crosshair.angle())
 
     def add_pattern(self):
         index = self.widget.ui.treeWidget.topLevelItemCount()

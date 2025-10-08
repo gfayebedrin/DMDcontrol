@@ -30,6 +30,8 @@ class PatternSequence:
     durations: list[timedelta]
     descriptions: list[str] | None = None
     shape_types: list[list[str]] | None = None
+    axis_origin_micrometre: np.ndarray | None = None
+    axis_angle_degrees: float | None = None
 
     def __post_init__(self):
         if not (len(self.sequence) == len(self.timings) == len(self.durations)):
@@ -52,6 +54,15 @@ class PatternSequence:
                     raise ValueError(
                         f"shape_types[{idx}] must have the same length as the corresponding pattern."
                     )
+
+        if self.axis_origin_micrometre is not None:
+            origin = np.asarray(self.axis_origin_micrometre, dtype=float)
+            if origin.shape != (2,):
+                raise ValueError("axis_origin_micrometre must be a 2-element vector.")
+            object.__setattr__(self, "axis_origin_micrometre", origin)
+
+        if self.axis_angle_degrees is not None:
+            object.__setattr__(self, "axis_angle_degrees", float(self.axis_angle_degrees))
 
     def __len__(self) -> int:
         """Return the length of the sequence."""
@@ -93,9 +104,32 @@ def play_pattern_sequence(
         timings[0] + delay >= timedelta()
     ), "Anticipation cannot be longer than the first timing."
 
+    origin_um = pattern_sequence.axis_origin_micrometre
+    angle_deg = pattern_sequence.axis_angle_degrees
+    if origin_um is not None and angle_deg is not None:
+        rotation = np.array(
+            [
+                [np.cos(np.radians(angle_deg)), -np.sin(np.radians(angle_deg))],
+                [np.sin(np.radians(angle_deg)), np.cos(np.radians(angle_deg))],
+            ],
+            dtype=float,
+        )
+        origin_um = np.asarray(origin_um, dtype=float)
+
+        def _axis_to_camera_um(poly: np.ndarray) -> np.ndarray:
+            poly_um = np.asarray(poly, dtype=float)
+            return (rotation @ poly_um.T).T + origin_um
+
+        transformed_patterns = [
+            [_axis_to_camera_um(poly) for poly in pattern]
+            for pattern in pattern_sequence.patterns
+        ]
+    else:
+        transformed_patterns = pattern_sequence.patterns
+
     # Upload the patterns to the DMD
     dmd.frames = [
-        polygons_to_mask(pattern, calibration) for pattern in pattern_sequence.patterns
+        polygons_to_mask(pattern, calibration) for pattern in transformed_patterns
     ]
 
     # Schedule the frames to be shown

@@ -29,6 +29,9 @@ class _BaseShape:
     def get_points(self) -> np.ndarray:
         raise NotImplementedError
 
+    def set_points(self, points: np.ndarray) -> None:
+        raise NotImplementedError
+
 
 class PolygonShape(_BaseShape):
     def __init__(self, points: np.ndarray, item: QTreeWidgetItem):
@@ -45,69 +48,58 @@ class PolygonShape(_BaseShape):
             pts.append([pos.x(), pos.y()])
         return np.asarray(pts, dtype=float)
 
+    def set_points(self, points: np.ndarray) -> None:
+        from PySide6.QtCore import QPointF
+
+        pts = [QPointF(float(x), float(y)) for x, y in np.asarray(points, dtype=float)]
+        self.roi.setPoints(pts, closed=True)
+        self.roi.setAngle(0.0)
+        self.roi.setPos(0.0, 0.0)
+
 
 class RectangleShape(_BaseShape):
     def __init__(self, points: np.ndarray, item: QTreeWidgetItem):
-        ordered = self._order_points(np.asarray(points, dtype=float))
-        width_vector = ordered[1] - ordered[0]
-        height_vector = ordered[2] - ordered[1]
-        width = float(np.linalg.norm(width_vector))
-        height = float(np.linalg.norm(height_vector))
-        if width == 0 or height == 0:
-            width = height = 1.0
-        center = ordered.mean(axis=0)
+        points = np.asarray(points, dtype=float)
+        min_x = float(np.min(points[:, 0]))
+        max_x = float(np.max(points[:, 0]))
+        min_y = float(np.min(points[:, 1]))
+        max_y = float(np.max(points[:, 1]))
+        width = max(max_x - min_x, 1e-6)
+        height = max(max_y - min_y, 1e-6)
         roi = pg.RectROI(
-            pos=(center[0] - width / 2.0, center[1] - height / 2.0),
+            pos=(min_x, min_y),
             size=(width, height),
-            rotatable=True,
+            rotatable=False,
             removable=False,
         )
         super().__init__(item, roi, "rectangle")
-        angle_deg = float(np.degrees(np.arctan2(width_vector[1], width_vector[0])))
-        self.roi.setAngle(angle_deg)
-
-    @staticmethod
-    def _order_points(points: np.ndarray) -> np.ndarray:
-        center = points.mean(axis=0)
-        angles = np.arctan2(points[:, 1] - center[1], points[:, 0] - center[0])
-        order = np.argsort(angles)
-        return points[order]
-
-    def _size(self) -> tuple[float, float]:
-        size = self.roi.size()
-        try:
-            width = float(size.x())
-            height = float(size.y())
-        except AttributeError:
-            width, height = size
-        return width, height
-
-    def _center_point(self) -> QPointF:
-        pts = self.get_points()
-        if pts.size == 0:
-            return QPointF(0.0, 0.0)
-        center = pts.mean(axis=0)
-        return QPointF(float(center[0]), float(center[1]))
+        self.roi.setAngle(0.0)
 
     def change_ref(self, center: QPointF, angle: float) -> None:
-        current_center = self._center_point()
-        delta = QPointF(center.x() - current_center.x(), center.y() - current_center.y())
-        self.roi.setPos(self.roi.pos() + delta)
-        self.roi.setAngle(angle)
+        self.roi.setPos(center.x(), center.y())
+        self.roi.setAngle(0.0)
 
     def get_points(self) -> np.ndarray:
-        width, height = self._size()
-        local = [
-            QPointF(0.0, 0.0),
-            QPointF(width, 0.0),
-            QPointF(width, height),
-            QPointF(0.0, height),
-        ]
-        pts = []
-        for pt in local:
-            mapped = self.roi.mapToParent(pt)
-            pts.append([mapped.x(), mapped.y()])
-        return np.asarray(pts, dtype=float)
+        rect = self.roi.parentBounds()
+        if rect is None:
+            return np.zeros((0, 2), dtype=float)
+        x0 = float(rect.left())
+        y0 = float(rect.top())
+        x1 = float(rect.right())
+        y1 = float(rect.bottom())
+        return np.asarray([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], dtype=float)
+
+    def set_points(self, points: np.ndarray) -> None:
+        points = np.asarray(points, dtype=float)
+        min_x = float(np.min(points[:, 0]))
+        max_x = float(np.max(points[:, 0]))
+        min_y = float(np.min(points[:, 1]))
+        max_y = float(np.max(points[:, 1]))
+        width = max(max_x - min_x, 1e-6)
+        height = max(max_y - min_y, 1e-6)
+        self.roi.setAngle(0.0)
+        self.roi.setPos(min_x, min_y)
+        self.roi.setSize((width, height))
 
 
 class RoiManager(QObject):
@@ -180,10 +172,6 @@ class RoiManager(QObject):
         self._visible_rois.append(roi)
 
     # ---- Bulk ops ---------------------------------------------------------
-    def change_reference_all(self, center: QPointF, angle: float) -> None:
-        for shape in self._shapes.values():
-            shape.change_ref(center, angle)
-
     def remove_items(self, items: Iterable[QTreeWidgetItem]) -> None:
         for it in items:
             for i in range(it.childCount()):
@@ -207,3 +195,20 @@ class RoiManager(QObject):
             item: (shape.get_points(), shape.shape_type)
             for item, shape in self._shapes.items()
         }
+
+    def update_shape(
+        self, item: QTreeWidgetItem, shape_type: str, points: np.ndarray
+    ) -> None:
+        shape_type = str(shape_type).lower()
+        points = np.asarray(points, dtype=float)
+        was_visible = False
+        existing = self._shapes.get(item)
+        if existing is not None:
+            was_visible = existing.roi in self._visible_rois
+            self.unregister_item(item)
+        if shape_type == "rectangle":
+            new_shape = self.register_rectangle(item, points)
+        else:
+            new_shape = self.register_polygon(item, points)
+        if was_visible:
+            self._add_visible(new_shape.roi)

@@ -16,6 +16,7 @@ from PySide6.QtCore import (
     QStandardPaths,
     QTimer,
 )
+from PySide6.QtGui import QTransform
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -193,6 +194,160 @@ class _InteractiveRectangleCapture(QObject):
         if self._rect_item is not None:
             self._view_box.removeItem(self._rect_item)
             self._rect_item = None
+
+
+class _AxisCapture(QObject):
+    """Interactive helper to capture an axis vector with live preview."""
+
+    def __init__(self, view_box: pg.ViewBox, parent: QWidget | None = None):
+        super().__init__(parent)
+        self._view_box = view_box
+        self._scene = view_box.scene()
+        self._loop: QEventLoop | None = None
+        self._origin_view: QPointF | None = None
+        self._current_view: QPointF | None = None
+        self._line_item: pg.PlotDataItem | None = None
+        self._arrow_item: pg.ArrowItem | None = None
+        self._origin_item: pg.ScatterPlotItem | None = None
+        self._original_mouse_enabled: tuple[bool, bool] = (True, True)
+
+    def exec(self) -> tuple[QPointF, QPointF] | None:
+        if self._scene is None:
+            return None
+        self._loop = QEventLoop()
+        self._scene.installEventFilter(self)
+        mouse_enabled = self._view_box.state.get("mouseEnabled", (True, True))
+        self._original_mouse_enabled = (
+            bool(mouse_enabled[0]),
+            bool(mouse_enabled[1]),
+        )
+        self._view_box.setMouseEnabled(False, False)
+        self._loop.exec()
+        self._scene.removeEventFilter(self)
+        self._view_box.setMouseEnabled(*self._original_mouse_enabled)
+        self._cleanup_preview()
+        if self._origin_view is not None and self._current_view is not None:
+            result = (QPointF(self._origin_view), QPointF(self._current_view))
+        else:
+            result = None
+        self._origin_view = None
+        self._current_view = None
+        self._loop = None
+        return result
+
+    def eventFilter(self, _obj, event):  # noqa: D401
+        if self._loop is None:
+            return False
+        etype = event.type()
+        if etype == QEvent.GraphicsSceneMousePress:
+            if not self._view_box.sceneBoundingRect().contains(event.scenePos()):
+                return False
+            if event.button() == Qt.MouseButton.LeftButton:
+                self._origin_view = self._view_box.mapSceneToView(event.scenePos())
+                self._current_view = QPointF(self._origin_view)
+                self._ensure_preview_items()
+                self._update_preview(self._current_view)
+                event.accept()
+                return True
+            if event.button() == Qt.MouseButton.RightButton:
+                self._finish(cancel=True)
+                event.accept()
+                return True
+        elif etype == QEvent.GraphicsSceneMouseMove:
+            if self._origin_view is None:
+                return False
+            current = self._view_box.mapSceneToView(event.scenePos())
+            self._current_view = current
+            self._update_preview(current)
+            event.accept()
+            return True
+        elif etype == QEvent.GraphicsSceneMouseRelease:
+            if (
+                self._origin_view is not None
+                and event.button() == Qt.MouseButton.LeftButton
+            ):
+                current = self._view_box.mapSceneToView(event.scenePos())
+                self._current_view = current
+                self._update_preview(current)
+                self._finish(cancel=False)
+                event.accept()
+                return True
+        elif etype == QEvent.GraphicsSceneMouseDoubleClick:
+            if (
+                self._origin_view is not None
+                and event.button() == Qt.MouseButton.LeftButton
+            ):
+                current = self._view_box.mapSceneToView(event.scenePos())
+                self._current_view = current
+                self._update_preview(current)
+                self._finish(cancel=False)
+                event.accept()
+                return True
+        elif etype == QEvent.KeyPress and event.key() == Qt.Key.Key_Escape:
+            self._finish(cancel=True)
+            event.accept()
+            return True
+        return False
+
+    def _ensure_preview_items(self) -> None:
+        if self._line_item is None:
+            self._line_item = pg.PlotDataItem(
+                pen=pg.mkPen(color="yellow", width=2),
+                name="axis_preview_line",
+            )
+            self._line_item.setZValue(9_000)
+            self._view_box.addItem(self._line_item)
+        if self._arrow_item is None:
+            self._arrow_item = pg.ArrowItem(
+                angle=0,
+                headLen=15,
+                pen=pg.mkPen("yellow"),
+                brush=pg.mkBrush("yellow"),
+            )
+            self._arrow_item.setZValue(9_001)
+            self._view_box.addItem(self._arrow_item)
+        if self._origin_item is None:
+            self._origin_item = pg.ScatterPlotItem(
+                [0.0],
+                [0.0],
+                size=8,
+                brush=pg.mkBrush("yellow"),
+                pen=pg.mkPen("yellow"),
+            )
+            self._origin_item.setZValue(9_001)
+            self._view_box.addItem(self._origin_item)
+
+    def _update_preview(self, current: QPointF) -> None:
+        if self._origin_view is None:
+            return
+        self._ensure_preview_items()
+        ox, oy = self._origin_view.x(), self._origin_view.y()
+        cx, cy = current.x(), current.y()
+        self._line_item.setData([ox, cx], [oy, cy])
+        if self._arrow_item is not None:
+            angle_deg = float(np.degrees(np.arctan2(cy - oy, cx - ox)))
+            self._arrow_item.setPos(cx, cy)
+            self._arrow_item.setStyle(angle=angle_deg)
+        if self._origin_item is not None:
+            self._origin_item.setData([ox], [oy])
+
+    def _finish(self, cancel: bool) -> None:
+        if cancel or self._origin_view is None or self._current_view is None:
+            self._origin_view = None
+            self._current_view = None
+        if self._loop is not None and self._loop.isRunning():
+            self._loop.quit()
+
+    def _cleanup_preview(self) -> None:
+        if self._line_item is not None:
+            self._view_box.removeItem(self._line_item)
+            self._line_item = None
+        if self._arrow_item is not None:
+            self._view_box.removeItem(self._arrow_item)
+            self._arrow_item = None
+        if self._origin_item is not None:
+            self._view_box.removeItem(self._origin_item)
+            self._origin_item = None
 
 
 class _PolygonDrawingCapture(QObject):
@@ -380,7 +535,6 @@ class StimDMDWidget(QWidget):
         self.ui.setupUi(self)
         self.setObjectName(name)
         self.last_roi = None
-        self.crosshair = pg.CrosshairROI([0, 0], [20, 20])
         self.dmd = dmd
         # GraphicsLayoutWidget gives us fine control over plot + histogram layout.
         self._graphics_widget = pg.GraphicsLayoutWidget(parent=self)
@@ -404,6 +558,30 @@ class StimDMDWidget(QWidget):
         # Attach image directly to the view box so it follows pans/zooms.
         self._view_box.addItem(self._image_item)
 
+        self._axis_line_item = pg.PlotDataItem(pen=pg.mkPen(color="c", width=2))
+        self._axis_line_item.setZValue(8_500)
+        self._axis_arrow_item = pg.ArrowItem(
+            angle=0,
+            headLen=25,
+            pen=pg.mkPen("c"),
+            brush=pg.mkBrush("c"),
+        )
+        self._axis_arrow_item.setZValue(8_501)
+        self._axis_origin_item = pg.ScatterPlotItem(
+            [0.0],
+            [0.0],
+            size=10,
+            brush=pg.mkBrush("c"),
+            pen=pg.mkPen("c"),
+        )
+        self._axis_origin_item.setZValue(8_502)
+        self._plot_item.addItem(self._axis_line_item)
+        self._plot_item.addItem(self._axis_arrow_item)
+        self._plot_item.addItem(self._axis_origin_item)
+        self._axis_line_item.hide()
+        self._axis_arrow_item.hide()
+        self._axis_origin_item.hide()
+
         # HistogramLUTWidget provides the contrast controls that users expect.
         self._hist_widget = pg.HistogramLUTWidget(parent=self)
         self._hist_widget.setImageItem(self._image_item)
@@ -423,6 +601,9 @@ class StimDMDWidget(QWidget):
         self.tree_manager = tree_table_manager.TreeManager(self)
         self.table_manager = tree_table_manager.TableManager(self)
         self._preferences = _CalibrationPreferences()
+        self._axis_origin_camera = np.array([0.0, 0.0], dtype=float)
+        self._axis_angle_rad = 0.0
+        self._axis_defined = False
         self._last_calibration_file_path: str = (
             self._preferences.last_calibration_file_path()
         )
@@ -432,6 +613,8 @@ class StimDMDWidget(QWidget):
         self._console = console.Console(self.ui.plainTextEdit_console_output)
         self._calibration: DMDCalibration | None = None
         self._current_image: np.ndarray | None = None
+        self._update_image_transform()
+        self._update_axis_visuals()
 
     @property
     def model(self) -> PatternSequence:
@@ -455,13 +638,19 @@ class StimDMDWidget(QWidget):
                 shape = self.roi_manager.get_shape(poly_item)
                 if shape is None:
                     continue
-                points = shape.get_points()
-                micrometres = self._calibration.camera_to_micrometre(points.T).T
-                pattern_polys.append(micrometres)
+                axis_points = shape.get_points()
+                axis_um = self._axis_pixels_to_axis_micrometres(axis_points)
+                pattern_polys.append(axis_um)
                 pattern_shapes.append(shape.shape_type)
             patterns.append(pattern_polys)
             shape_types.append(pattern_shapes)
         timings_ms, durations_ms, sequence = self._read_table_ms()
+        axis_origin_um = (
+            self._axis_origin_micrometre() if self._axis_defined else None
+        )
+        axis_angle_deg = (
+            float(np.degrees(self._axis_angle_rad)) if self._axis_defined else None
+        )
         return PatternSequence(
             patterns=patterns,
             sequence=sequence,
@@ -469,6 +658,8 @@ class StimDMDWidget(QWidget):
             durations=[timedelta(milliseconds=int(d)) for d in durations_ms],
             descriptions=descriptions,
             shape_types=shape_types,
+            axis_origin_micrometre=axis_origin_um,
+            axis_angle_degrees=axis_angle_deg,
         )
 
     @model.setter
@@ -493,6 +684,24 @@ class StimDMDWidget(QWidget):
             if model.shape_types is not None
             else [["polygon"] * len(pattern) for pattern in model.patterns]
         )
+
+        if (
+            self._calibration is not None
+            and model.axis_origin_micrometre is not None
+            and model.axis_angle_degrees is not None
+        ):
+            origin_um = np.asarray(model.axis_origin_micrometre, dtype=float)
+            origin_camera = (
+                self._calibration.micrometre_to_camera(origin_um.reshape(2, 1)).T[0]
+            )
+            angle_rad = float(np.radians(model.axis_angle_degrees))
+            defined = True
+        else:
+            origin_camera = np.array([0.0, 0.0], dtype=float)
+            angle_rad = 0.0
+            defined = False
+
+        self._set_axis_state(origin_camera, angle_rad, defined)
         for pat_idx, pattern in enumerate(model.patterns):
 
             root = QTreeWidgetItem([""])
@@ -517,17 +726,21 @@ class StimDMDWidget(QWidget):
                 shape_kind = str(shape_kind).lower()
                 node = QTreeWidgetItem([shape_kind])
                 root.addChild(node)
-                points = np.asarray(poly_pts, dtype=float)
-                if self._calibration is not None:
-                    points = self._calibration.micrometre_to_camera(points.T).T
+                points_um = np.asarray(poly_pts, dtype=float)
+                points_axis = (
+                    self._axis_micrometres_to_axis_pixels(points_um)
+                    if self._calibration is not None
+                    else points_um
+                )
                 if shape_kind == "rectangle":
-                    shape = self.roi_manager.register_rectangle(node, points)
+                    self.roi_manager.register_rectangle(node, points_axis)
                 else:
-                    shape = self.roi_manager.register_polygon(node, points)
-                shape.change_ref(self.crosshair.pos(), self.crosshair.angle())
+                    self.roi_manager.register_polygon(node, points_axis)
         self.roi_manager.clear_visible_only()
         self.tree_manager.renumber_pattern_labels()
         self._write_table_ms(model)
+        self._fit_view_to_image()
+        self._update_axis_visuals()
 
     @property
     def calibration(self) -> DMDCalibration | None:
@@ -577,6 +790,206 @@ class StimDMDWidget(QWidget):
 
     def _get_view_box(self) -> pg.ViewBox:
         return self._view_box
+
+    def _rotation_matrix(self, angle: float | None = None) -> np.ndarray:
+        angle = self._axis_angle_rad if angle is None else float(angle)
+        cos_a = float(np.cos(angle))
+        sin_a = float(np.sin(angle))
+        return np.array([[cos_a, -sin_a], [sin_a, cos_a]], dtype=float)
+
+    def _camera_to_axis(
+        self,
+        points: np.ndarray,
+        *,
+        origin: np.ndarray | None = None,
+        angle: float | None = None,
+    ) -> np.ndarray:
+        arr = np.asarray(points, dtype=float)
+        was_1d = arr.ndim == 1
+        pts = np.atleast_2d(arr)
+        origin_vec = (
+            self._axis_origin_camera
+            if origin is None
+            else np.asarray(origin, dtype=float)
+        )
+        R = self._rotation_matrix(angle)
+        relative = pts - origin_vec
+        result = (R.T @ relative.T).T
+        return result[0] if was_1d else result
+
+    def _axis_to_camera(
+        self,
+        points: np.ndarray,
+        *,
+        origin: np.ndarray | None = None,
+        angle: float | None = None,
+    ) -> np.ndarray:
+        arr = np.asarray(points, dtype=float)
+        was_1d = arr.ndim == 1
+        pts = np.atleast_2d(arr)
+        origin_vec = (
+            self._axis_origin_camera
+            if origin is None
+            else np.asarray(origin, dtype=float)
+        )
+        R = self._rotation_matrix(angle)
+        result = (R @ pts.T).T + origin_vec
+        return result[0] if was_1d else result
+
+    def _axis_origin_micrometre(
+        self, origin_camera: np.ndarray | None = None
+    ) -> np.ndarray:
+        if self._calibration is None:
+            raise RuntimeError("A calibration is required for micrometre conversion.")
+        origin_vec = (
+            self._axis_origin_camera
+            if origin_camera is None
+            else np.asarray(origin_camera, dtype=float)
+        )
+        mic = self._calibration.camera_to_micrometre(origin_vec.reshape(2, 1)).T[0]
+        return np.asarray(mic, dtype=float)
+
+    def _axis_pixels_to_axis_micrometres(self, points: np.ndarray) -> np.ndarray:
+        if self._calibration is None:
+            raise RuntimeError("A calibration is required for micrometre conversion.")
+        arr = np.asarray(points, dtype=float)
+        was_1d = arr.ndim == 1
+        camera_pts = self._axis_to_camera(arr)
+        mic_camera = self._calibration.camera_to_micrometre(camera_pts.T).T
+        origin_um = self._axis_origin_micrometre()
+        R_neg = self._rotation_matrix(-self._axis_angle_rad)
+        relative = mic_camera - origin_um
+        axis_um = (R_neg @ relative.T).T
+        return axis_um[0] if was_1d else axis_um
+
+    def _axis_micrometres_to_axis_pixels(self, points_um: np.ndarray) -> np.ndarray:
+        if self._calibration is None:
+            raise RuntimeError("A calibration is required for micrometre conversion.")
+        arr = np.asarray(points_um, dtype=float)
+        was_1d = arr.ndim == 1
+        points_um = np.atleast_2d(arr)
+        origin_um = self._axis_origin_micrometre()
+        R_pos = self._rotation_matrix()
+        mic_camera = (R_pos @ points_um.T).T + origin_um
+        camera_pts = self._calibration.micrometre_to_camera(mic_camera.T).T
+        axis_pts = self._camera_to_axis(camera_pts)
+        return axis_pts[0] if was_1d else axis_pts
+
+    def _update_image_transform(self) -> None:
+        if not self._axis_defined:
+            self._image_item.setTransform(QTransform())
+            return
+        ox, oy = self._axis_origin_camera.astype(float)
+        cos_a = float(np.cos(self._axis_angle_rad))
+        sin_a = float(np.sin(self._axis_angle_rad))
+        tx = -(cos_a * ox + sin_a * oy)
+        ty = sin_a * ox - cos_a * oy
+        transform = QTransform(
+            cos_a,
+            -sin_a,
+            0.0,
+            sin_a,
+            cos_a,
+            0.0,
+            tx,
+            ty,
+            1.0,
+        )
+        self._image_item.setTransform(transform)
+
+    def _image_axis_bounds(self) -> tuple[float, float, float, float]:
+        if self._current_image is None:
+            return (-50.0, 50.0, -50.0, 50.0)
+        height, width = self._current_image.shape[:2]
+        corners_camera = np.array(
+            [[0.0, 0.0], [float(width), 0.0], [float(width), float(height)], [0.0, float(height)]],
+            dtype=float,
+        )
+        corners_axis = self._camera_to_axis(corners_camera)
+        min_x = float(np.min(corners_axis[:, 0]))
+        max_x = float(np.max(corners_axis[:, 0]))
+        min_y = float(np.min(corners_axis[:, 1]))
+        max_y = float(np.max(corners_axis[:, 1]))
+        return min_x, max_x, min_y, max_y
+
+    def _update_axis_visuals(self) -> None:
+        show = self._axis_defined
+        for item in (self._axis_line_item, self._axis_arrow_item, self._axis_origin_item):
+            item.setVisible(show)
+        if not show:
+            return
+        min_x, max_x, min_y, max_y = self._image_axis_bounds()
+        span = max(max_x - min_x, max_y - min_y, 1.0)
+        origin_x, origin_y = 0.0, 0.0
+        end_x, end_y = span * 0.25, 0.0
+        self._axis_line_item.setData([origin_x, end_x], [origin_y, end_y])
+        self._axis_arrow_item.setPos(end_x, end_y)
+        self._axis_arrow_item.setStyle(angle=0.0)
+        self._axis_origin_item.setData([origin_x], [origin_y])
+
+    def _update_zoom_constraints(self, _width: int, _height: int) -> None:
+        view_box = self._get_view_box()
+        view_box.setLimits(
+            minXRange=1.0,
+            minYRange=1.0,
+            maxXRange=None,
+            maxYRange=None,
+        )
+
+    def _fit_view_to_image(self, *, use_axis: bool = True) -> None:
+        if use_axis and self._axis_defined:
+            min_x, max_x, min_y, max_y = self._image_axis_bounds()
+        else:
+            if self._current_image is None:
+                min_x = max_x = min_y = max_y = 0.0
+            else:
+                height, width = self._current_image.shape[:2]
+                min_x, max_x = 0.0, float(width)
+                min_y, max_y = 0.0, float(height)
+        span_x = max_x - min_x
+        span_y = max_y - min_y
+        span = max(span_x, span_y, 1.0)
+        margin = max(span * 0.05, 1.0)
+        half_span = span / 2.0 + margin
+        center_x = (min_x + max_x) / 2.0
+        center_y = (min_y + max_y) / 2.0
+        x_range = (center_x - half_span, center_x + half_span)
+        y_range = (center_y - half_span, center_y + half_span)
+        self._update_zoom_constraints(int(span), int(span))
+        self._get_view_box().setRange(xRange=x_range, yRange=y_range, padding=0.0)
+
+    def _set_axis_state(
+        self, origin_camera: np.ndarray, angle_rad: float, defined: bool
+    ) -> None:
+        self._axis_origin_camera = np.asarray(origin_camera, dtype=float)
+        self._axis_angle_rad = float(angle_rad)
+        self._axis_defined = defined
+        self._update_image_transform()
+        self._update_axis_visuals()
+
+    def _apply_axis_definition(self, origin_camera: np.ndarray, angle_rad: float) -> None:
+        existing_shapes = self.roi_manager.export_shape_points()
+        camera_points_map: dict[QTreeWidgetItem, tuple[np.ndarray, str]] = {}
+        if existing_shapes:
+            prev_origin = self._axis_origin_camera.copy()
+            prev_angle = self._axis_angle_rad
+            for item, (axis_points, shape_type) in existing_shapes.items():
+                axis_pts = np.asarray(axis_points, dtype=float)
+                cam_pts = self._axis_to_camera(axis_pts, origin=prev_origin, angle=prev_angle)
+                camera_points_map[item] = (cam_pts, shape_type)
+
+        self._axis_origin_camera = np.asarray(origin_camera, dtype=float)
+        self._axis_angle_rad = float(angle_rad)
+        self._axis_defined = True
+        self._update_image_transform()
+
+        for item, (camera_pts, shape_type) in camera_points_map.items():
+            axis_pts = self._camera_to_axis(camera_pts)
+            self.roi_manager.update_shape(item, shape_type, axis_pts)
+
+        self._update_axis_visuals()
+        self._fit_view_to_image()
+        self._update_axis_visuals()
 
     def _install_context_menu(self) -> None:
         try:
@@ -725,7 +1138,6 @@ class StimDMDWidget(QWidget):
             shape = self.roi_manager.register_rectangle(node, points)
         else:
             shape = self.roi_manager.register_polygon(node, points)
-        shape.change_ref(self.crosshair.pos(), self.crosshair.angle())
         parent_item.setExpanded(True)
         self.ui.treeWidget.setCurrentItem(node)
         self.roi_manager.show_for_item(node)
@@ -779,7 +1191,7 @@ class StimDMDWidget(QWidget):
         self._update_zoom_constraints(width, height)
         view_box = self._get_view_box()
         view_box.enableAutoRange(pg.ViewBox.XYAxes, enable=False)
-        self._fit_image_in_view(width, height)
+        self._fit_view_to_image(use_axis=self._axis_defined)
 
     def remember_calibration_file(self, path: str) -> None:
         """Store the path to the most recently used calibration file."""
@@ -835,7 +1247,9 @@ class StimDMDWidget(QWidget):
             return
         self._hist_widget.region.setRegion(levels)
 
-    def _set_image(self, image: np.ndarray, *, fit_to_view: bool = False) -> None:
+    def _set_image(
+        self, image: np.ndarray, *, fit_to_view: bool = False, apply_axis: bool = True
+    ) -> None:
         image = np.asarray(image)
         if image.ndim not in (2, 3):
             raise ValueError("Images must be 2D grayscale or 3-channel colour arrays.")
@@ -875,14 +1289,25 @@ class StimDMDWidget(QWidget):
         else:
             self._hist_widget.region.setRegion(levels)
 
+        self._current_image = image
+        if apply_axis and self._axis_defined:
+            self._update_image_transform()
+            self._update_axis_visuals()
+        else:
+            self._image_item.setTransform(QTransform())
+            for item in (
+                self._axis_line_item,
+                self._axis_arrow_item,
+                self._axis_origin_item,
+            ):
+                item.hide()
         self._update_zoom_constraints(width, height)
         view_box.enableAutoRange(pg.ViewBox.XYAxes, enable=False)
         if preserve_view and previous_range is not None:
             x_range, y_range = previous_range
             view_box.setRange(xRange=x_range, yRange=y_range, padding=0.0)
         else:
-            self._fit_image_in_view(width, height)
-        self._current_image = image
+            self._fit_view_to_image(use_axis=apply_axis and self._axis_defined)
 
     def _store_histogram_levels(self) -> None:
         try:
@@ -940,7 +1365,7 @@ class StimDMDWidget(QWidget):
         selected_item = selected_items[0] if selected_items else None
         self.roi_manager.clear_visible_only()
 
-        self._set_image(calibration_image, fit_to_view=True)
+        self._set_image(calibration_image, fit_to_view=True, apply_axis=False)
 
         polygon_points = self._prompt_calibration_rectangle()
         if polygon_points is None:
@@ -1097,13 +1522,28 @@ class StimDMDWidget(QWidget):
         self._plot_item.showGrid(show, show)
 
     def _define_axis(self):
-        if self.ui.pushButton_define_axis.isChecked():
-            self._plot_item.addItem(self.crosshair)
-        else:
-            self._plot_item.removeItem(self.crosshair)
-            self.roi_manager.change_reference_all(
-                self.crosshair.pos(), self.crosshair.angle()
-            )
+        button = self.ui.pushButton_define_axis
+        if not button.isEnabled():
+            return
+        button.setChecked(True)
+        print(
+            "Axis tool: click to set origin, drag to direction, release to confirm. Right-click or Esc cancels."
+        )
+        capture = _AxisCapture(self._get_view_box(), self)
+        result = capture.exec()
+        button.setChecked(False)
+        if result is None:
+            return
+        origin_view, end_view = result
+        origin_axis = np.array([origin_view.x(), origin_view.y()], dtype=float)
+        end_axis = np.array([end_view.x(), end_view.y()], dtype=float)
+        vector_axis = end_axis - origin_axis
+        if np.linalg.norm(vector_axis) < 1e-6:
+            return
+        origin_camera = self._axis_to_camera(origin_axis)
+        direction_camera = self._rotation_matrix() @ vector_axis
+        angle_camera = float(np.arctan2(direction_camera[1], direction_camera[0]))
+        self._apply_axis_definition(origin_camera, angle_camera)
 
     def _new_model(self):
         self.model = PatternSequence(

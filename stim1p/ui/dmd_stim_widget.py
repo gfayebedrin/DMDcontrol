@@ -1,10 +1,21 @@
 import os
 import glob
+from pathlib import Path
 import numpy as np
 from PIL import Image
 from datetime import timedelta
 
-from PySide6.QtCore import QEvent, QEventLoop, QObject, QPointF, QRectF, Qt
+from PySide6.QtCore import (
+    QEvent,
+    QEventLoop,
+    QObject,
+    QPointF,
+    QRectF,
+    Qt,
+    QSettings,
+    QStandardPaths,
+    QTimer,
+)
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -35,25 +46,34 @@ from . import console, roi_manager, tree_table_manager
 class _CalibrationDialog(QDialog):
     """Collect user inputs required to build a calibration."""
 
-    def __init__(self, parent: QWidget | None = None):
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        default_mirrors: tuple[int, int] = (100, 100),
+        default_pixel_size: float = 1.0,
+    ):
         super().__init__(parent)
         self.setWindowTitle("Calibrate DMD")
         layout = QFormLayout(self)
 
         self._mirror_x = QSpinBox(self)
         self._mirror_x.setRange(1, 8192)
-        self._mirror_x.setValue(100)
+        default_mirror_x = max(1, min(8192, int(default_mirrors[0])))
+        self._mirror_x.setValue(default_mirror_x)
         layout.addRow("Mirrors (X)", self._mirror_x)
 
         self._mirror_y = QSpinBox(self)
         self._mirror_y.setRange(1, 8192)
-        self._mirror_y.setValue(100)
+        default_mirror_y = max(1, min(8192, int(default_mirrors[1])))
+        self._mirror_y.setValue(default_mirror_y)
         layout.addRow("Mirrors (Y)", self._mirror_y)
 
         self._pixel_size = QDoubleSpinBox(self)
         self._pixel_size.setRange(1e-6, 10_000.0)
         self._pixel_size.setDecimals(6)
-        self._pixel_size.setValue(1.0)
+        clamped_size = max(self._pixel_size.minimum(), min(self._pixel_size.maximum(), float(default_pixel_size)))
+        self._pixel_size.setValue(clamped_size)
         layout.addRow("Camera pixel size (µm)", self._pixel_size)
 
         buttons = QDialogButtonBox(
@@ -174,6 +194,74 @@ class _InteractiveRectangleCapture(QObject):
             self._view_box.removeItem(self._rect_item)
             self._rect_item = None
 
+
+class _CalibrationPreferences:
+    """Small helper around QSettings for persisting calibration parameters."""
+
+    _ORG = "Stim1P"
+    _APP = "DMDStim"
+    _KEY_LAST_FILE = "calibration/last_file_path"
+    _KEY_LAST_IMAGE = "calibration/last_image_path"
+    _KEY_MIRRORS_X = "calibration/mirrors_x"
+    _KEY_MIRRORS_Y = "calibration/mirrors_y"
+    _KEY_PIXEL_SIZE = "calibration/pixel_size"
+
+    def __init__(self):
+        self._settings = QSettings(self._ORG, self._APP)
+
+    @staticmethod
+    def _to_str(value) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value
+        return str(value)
+
+    @staticmethod
+    def _to_int(value, default: int) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _to_float(value, default: float) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    def last_calibration_file_path(self) -> str:
+        return self._to_str(self._settings.value(self._KEY_LAST_FILE, ""))
+
+    def set_last_calibration_file_path(self, path: str) -> None:
+        self._settings.setValue(self._KEY_LAST_FILE, path)
+        self._settings.sync()
+
+    def last_calibration_image_path(self) -> str:
+        return self._to_str(self._settings.value(self._KEY_LAST_IMAGE, ""))
+
+    def set_last_calibration_image_path(self, path: str) -> None:
+        self._settings.setValue(self._KEY_LAST_IMAGE, path)
+        self._settings.sync()
+
+    def mirror_counts(self) -> tuple[int, int]:
+        x = self._to_int(self._settings.value(self._KEY_MIRRORS_X), 100)
+        y = self._to_int(self._settings.value(self._KEY_MIRRORS_Y), 100)
+        return x, y
+
+    def set_mirror_counts(self, mirrors_x: int, mirrors_y: int) -> None:
+        self._settings.setValue(self._KEY_MIRRORS_X, int(mirrors_x))
+        self._settings.setValue(self._KEY_MIRRORS_Y, int(mirrors_y))
+        self._settings.sync()
+
+    def pixel_size(self) -> float:
+        return self._to_float(self._settings.value(self._KEY_PIXEL_SIZE), 1.0)
+
+    def set_pixel_size(self, pixel_size: float) -> None:
+        self._settings.setValue(self._KEY_PIXEL_SIZE, float(pixel_size))
+        self._settings.sync()
+
 class StimDMDWidget(QWidget):
     def __init__(self, name="Stimulation DMD Widget", dmd=None, parent=None):
         super().__init__(parent=parent)
@@ -192,11 +280,12 @@ class StimDMDWidget(QWidget):
             self._view_box.setPadding(0.0)
         elif hasattr(self._view_box, "setDefaultPadding"):
             self._view_box.setDefaultPadding(0.0)
-        self._view_box.setAspectLocked(False)
+        self._view_box.setAspectLocked(True, 1.0)
         self._view_box.invertY(True)
         self._view_box.setMouseEnabled(True, True)
         self._view_box.enableAutoRange(pg.ViewBox.XYAxes, enable=True)
-        self._view_box.setLimits(xMin=0.0, yMin=0.0)
+        self._view_box.setLimits(minXRange=1.0, minYRange=1.0)
+        self._view_box.setMenuEnabled(True)
 
         # ImageItem renders the camera frame; keep it behind ROIs.
         self._image_item = pg.ImageItem()
@@ -222,7 +311,13 @@ class StimDMDWidget(QWidget):
         self.roi_manager = roi_manager.RoiManager(self._plot_item)
         self.tree_manager = tree_table_manager.TreeManager(self)
         self.table_manager = tree_table_manager.TableManager(self)
+        self._preferences = _CalibrationPreferences()
+        self._last_calibration_file_path: str = (
+            self._preferences.last_calibration_file_path()
+        )
         self._connect()
+        self._install_context_menu()
+        self._apply_saved_preferences()
         self._console = console.Console(self.ui.plainTextEdit_console_output)
         self._calibration: DMDCalibration | None = None
         self._current_image: np.ndarray | None = None
@@ -326,6 +421,7 @@ class StimDMDWidget(QWidget):
         self.ui.pushButton_load_patterns.clicked.connect(self._load_patterns_file)
         self.ui.pushButton_save_patterns.clicked.connect(self._save_file)
         self.ui.pushButton_calibrate_dmd.clicked.connect(self._calibrate_dmd)
+        self.ui.pushButton_reset_image_view.clicked.connect(self._reset_image_view)
         self.ui.treeWidget.itemClicked.connect(
             lambda item, _col: self.roi_manager.show_for_item(item)
         )
@@ -346,7 +442,179 @@ class StimDMDWidget(QWidget):
     def _get_view_box(self) -> pg.ViewBox:
         return self._view_box
 
-    def _set_image(self, image: np.ndarray) -> None:
+    def _install_context_menu(self) -> None:
+        try:
+            menu = self._view_box.getMenu()
+        except Exception:
+            menu = None
+        self._view_box_menu = menu
+        if menu is None:
+            return
+        if menu.property("_stim_context_menu_setup"):
+            return
+        menu.setProperty("_stim_context_menu_setup", True)
+        menu.addSeparator()
+        auto_levels_action = menu.addAction("Auto levels (full range)")
+        auto_levels_action.triggered.connect(self._apply_auto_levels_full)
+        clipped_levels_action = menu.addAction("Auto levels (1-99% percentile)")
+        clipped_levels_action.triggered.connect(self._apply_auto_levels_clipped)
+        menu.addSeparator()
+        reset_levels_action = menu.addAction("Reset histogram region")
+        reset_levels_action.triggered.connect(self._reset_histogram_region)
+
+    def _apply_saved_preferences(self) -> None:
+        last_image_path = self._preferences.last_calibration_image_path()
+        if last_image_path:
+            folder = os.path.dirname(last_image_path)
+            if folder:
+                self.ui.lineEdit_image_folder_path.setText(folder)
+        self._load_saved_calibration_if_available()
+
+    def _default_calibration_file_path(self) -> Path:
+        location = QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)
+        if not location:
+            location = os.path.join(Path.home(), ".stim1p")
+        base_path = Path(location).expanduser()
+        try:
+            base_path.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+        return base_path / "last_calibration.h5"
+
+    def _load_saved_calibration_if_available(self) -> None:
+        candidates: list[Path] = []
+        stored_path = self._preferences.last_calibration_file_path()
+        if stored_path:
+            candidates.append(Path(stored_path).expanduser())
+        default_path = self._default_calibration_file_path()
+        if not candidates or candidates[0] != default_path:
+            candidates.append(default_path)
+        for path in candidates:
+            if not path or not path.exists():
+                continue
+            try:
+                calibration = saving.load_calibration(str(path))
+            except Exception as exc:
+                print(f"Failed to load stored calibration from {path}: {exc}")
+                continue
+            self.calibration = calibration
+            self.remember_calibration_file(str(path))
+            self._preferences.set_pixel_size(calibration.camera_pixel_size_um)
+            return
+
+    def _persist_calibration(self, calibration: DMDCalibration) -> None:
+        target_path = self._preferences.last_calibration_file_path()
+        if target_path:
+            path = Path(target_path).expanduser()
+        else:
+            path = self._default_calibration_file_path()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+        try:
+            saving.save_calibration(str(path), calibration)
+        except Exception as exc:
+            print(f"Failed to persist calibration to {path}: {exc}")
+            return
+        self.remember_calibration_file(str(path))
+
+    def _compute_fit_rect(self, width: int, height: int) -> QRectF:
+        span = float(max(width, height))
+        if span <= 0.0:
+            span = 1.0
+        margin = max(span * 0.05, 1.0)
+        half_extent = span / 2.0 + margin
+        center_x = float(width) / 2.0
+        center_y = float(height) / 2.0
+        return QRectF(
+            center_x - half_extent,
+            center_y - half_extent,
+            2.0 * half_extent,
+            2.0 * half_extent,
+        )
+
+    def _update_zoom_constraints(self, _width: int, _height: int) -> None:
+        view_box = self._get_view_box()
+        view_box.setLimits(
+            minXRange=1.0,
+            minYRange=1.0,
+            maxXRange=None,
+            maxYRange=None,
+        )
+
+    def _fit_image_in_view(self, width: int, height: int) -> None:
+        fit_rect = self._compute_fit_rect(width, height)
+        view_box = self._get_view_box()
+        view_box.setRange(rect=fit_rect, padding=0.0)
+        QTimer.singleShot(
+            0, lambda: view_box.setRange(rect=QRectF(fit_rect), padding=0.0)
+        )
+
+    def _reset_image_view(self) -> None:
+        if self._current_image is None:
+            return
+        height, width = self._current_image.shape[:2]
+        self._update_zoom_constraints(width, height)
+        view_box = self._get_view_box()
+        view_box.enableAutoRange(pg.ViewBox.XYAxes, enable=False)
+        self._fit_image_in_view(width, height)
+
+    def remember_calibration_file(self, path: str) -> None:
+        """Store the path to the most recently used calibration file."""
+        self._last_calibration_file_path = path
+        self._preferences.set_last_calibration_file_path(path)
+
+    def last_calibration_file_path(self) -> str:
+        """Return the last calibration file recorded for this session."""
+        return self._last_calibration_file_path
+
+    def _apply_auto_levels_full(self) -> None:
+        self._apply_histogram_levels(percentile=None)
+
+    def _apply_auto_levels_clipped(self) -> None:
+        self._apply_histogram_levels(percentile=(1.0, 99.0))
+
+    def _apply_histogram_levels(
+        self, percentile: tuple[float, float] | None
+    ) -> None:
+        if self._current_image is None:
+            return
+        data = self._current_image
+        if data.ndim == 3:
+            # Collapse colour channels to pick global min/max.
+            data = data.reshape(-1, data.shape[2])
+        try:
+            if percentile is None:
+                lower = float(np.nanmin(data))
+                upper = float(np.nanmax(data))
+            else:
+                low_p, high_p = percentile
+                finite = data[np.isfinite(data)]
+                if finite.size == 0:
+                    return
+                lower = float(np.nanpercentile(finite, low_p))
+                upper = float(np.nanpercentile(finite, high_p))
+        except Exception:
+            return
+        if not np.isfinite(lower) or not np.isfinite(upper) or upper <= lower:
+            return
+        levels = (lower, upper)
+        try:
+            self._image_item.setLevels(levels)
+        except Exception:
+            pass
+        self._hist_widget.region.setRegion(levels)
+        self._current_levels = levels
+
+    def _reset_histogram_region(self) -> None:
+        levels = self._current_levels
+        if levels is None:
+            self._apply_auto_levels_full()
+            return
+        self._hist_widget.region.setRegion(levels)
+
+    def _set_image(self, image: np.ndarray, *, fit_to_view: bool = False) -> None:
         image = np.asarray(image)
         if image.ndim not in (2, 3):
             raise ValueError("Images must be 2D grayscale or 3-channel colour arrays.")
@@ -354,9 +622,17 @@ class StimDMDWidget(QWidget):
         previous_levels = self._current_levels
 
         view_box = self._get_view_box()
-        try:
-            previous_range = view_box.viewRange()
-        except Exception:
+        preserve_view = (
+            not fit_to_view
+            and self._current_image is not None
+            and self._current_image.shape[:2] == image.shape[:2]
+        )
+        if preserve_view:
+            try:
+                previous_range = view_box.viewRange()
+            except Exception:
+                previous_range = None
+        else:
             previous_range = None
 
         # ImageView expects column-major data; transpose so axes remain aligned.
@@ -378,22 +654,13 @@ class StimDMDWidget(QWidget):
         else:
             self._hist_widget.region.setRegion(levels)
 
-        self._view_box.enableAutoRange(pg.ViewBox.XYAxes, enable=False)
-        self._view_box.setLimits(
-            xMin=0.0,
-            yMin=0.0,
-            xMax=float(width),
-            yMax=float(height),
-        )
-        if previous_range is not None:
+        self._update_zoom_constraints(width, height)
+        view_box.enableAutoRange(pg.ViewBox.XYAxes, enable=False)
+        if preserve_view and previous_range is not None:
             x_range, y_range = previous_range
-            self._view_box.setRange(xRange=x_range, yRange=y_range, padding=0.0)
+            view_box.setRange(xRange=x_range, yRange=y_range, padding=0.0)
         else:
-            self._view_box.setRange(
-                xRange=(0.0, float(width)),
-                yRange=(0.0, float(height)),
-                padding=0.0,
-            )
+            self._fit_image_in_view(width, height)
         self._current_image = image
 
     def _store_histogram_levels(self) -> None:
@@ -409,12 +676,17 @@ class StimDMDWidget(QWidget):
             if not path:
                 return
             image = np.array(Image.open(path))
-            self._set_image(image)
+            self._set_image(image, fit_to_view=True)
         except Exception:
             pass
 
     def _calibrate_dmd(self):
         initial_dir = self.ui.lineEdit_image_folder_path.text().strip()
+        stored_image_path = self._preferences.last_calibration_image_path()
+        if stored_image_path:
+            stored_dir = os.path.dirname(stored_image_path)
+            if stored_dir:
+                initial_dir = stored_dir
         file_filter = (
             "Image files (*.png *.jpg *.jpeg *.tif *.tiff *.gif);;All files (*)"
         )
@@ -436,6 +708,10 @@ class StimDMDWidget(QWidget):
                 f"Unable to load calibration image:\n{exc}",
             )
             return
+        self._preferences.set_last_calibration_image_path(file_path)
+        selected_dir = os.path.dirname(file_path)
+        if selected_dir:
+            self.ui.lineEdit_image_folder_path.setText(selected_dir)
 
         previous_image = self._current_image
         previous_view = self._capture_view_state()
@@ -443,7 +719,7 @@ class StimDMDWidget(QWidget):
         selected_item = selected_items[0] if selected_items else None
         self.roi_manager.clear_visible_only()
 
-        self._set_image(calibration_image)
+        self._set_image(calibration_image, fit_to_view=True)
 
         polygon_points = self._prompt_calibration_rectangle()
         if polygon_points is None:
@@ -455,12 +731,18 @@ class StimDMDWidget(QWidget):
             self._restore_after_calibration(previous_image, previous_view, selected_item)
             return
 
-        dialog = _CalibrationDialog(self)
+        dialog = _CalibrationDialog(
+            self,
+            default_mirrors=self._preferences.mirror_counts(),
+            default_pixel_size=self._preferences.pixel_size(),
+        )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             self._restore_after_calibration(previous_image, previous_view, selected_item)
             return
 
         mirrors_x, mirrors_y, pixel_size = dialog.values()
+        self._preferences.set_mirror_counts(mirrors_x, mirrors_y)
+        self._preferences.set_pixel_size(pixel_size)
         camera_shape = (
             int(calibration_image.shape[1]),
             int(calibration_image.shape[0]),
@@ -487,6 +769,7 @@ class StimDMDWidget(QWidget):
             return
 
         self.calibration = calibration
+        self._persist_calibration(calibration)
         print(
             "Updated DMD calibration: pixels/mirror=(%.3f, %.3f), µm/mirror=(%.3f, %.3f)"
             % (
@@ -586,7 +869,7 @@ class StimDMDWidget(QWidget):
             return
         last_image = max(images, key=os.path.getmtime)
         image = np.array(Image.open(last_image))
-        self._set_image(image)
+        self._set_image(image, fit_to_view=True)
 
     def _show_grid(self):
         show = self.ui.pushButton_show_grid.isChecked()

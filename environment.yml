@@ -10,4 +10,3 @@ dependencies:
   - h5py
   - pyqtgraph
   - pip
-prefix: /home/ljp/.local/bin/miniforge3/envs/dmd-control

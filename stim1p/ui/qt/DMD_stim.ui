@@ -373,6 +373,8 @@
           <number>0</number>
          </property>
          <item>
+          <layout class="QHBoxLayout" name="horizontalLayout_image_controls">
+          <item>
           <widget class="QPushButton" name="pushButton_load_image">
            <property name="text">
             <string>Load single image</string>
@@ -382,6 +384,19 @@
            </property>
           </widget>
          </item>
+         <item>
+          <widget class="QPushButton" name="pushButton_reset_image_view">
+           <property name="text">
+            <string>Reset image view</string>
+           </property>
+           <property name="icon">
+            <iconset theme="QIcon::ThemeIcon::ViewRefresh"/>
+           </property>
+          </widget>
+         </item>
+          </layout>
+         </item>
+         
          <item>
           <layout class="QHBoxLayout" name="horizontalLayout_image_folder">
            <property name="spacing">

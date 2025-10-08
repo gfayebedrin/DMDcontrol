@@ -42,18 +42,6 @@ class DMDCalibration:
     camera_pixels_per_mirror: tuple[float, float] = (1.0, 1.0)
     camera_pixel_size_um: float = 1.0
     micrometers_per_mirror: tuple[float, float] = (1.0, 1.0)
-    X_min: int = 0
-    X_max: int = 1023
-    Y_min: int = 0
-    Y_max: int = 767
-    x_min: float = 0.0
-    x_max: float = 1.0
-    y_min: float = 0.0
-    y_max: float = 1.0
-
-    def __post_init__(self):
-        object.__setattr__(self, "X_max", int(self.dmd_shape[0] - 1))
-        object.__setattr__(self, "Y_max", int(self.dmd_shape[1] - 1))
 
     # ------------------------------------------------------------------
     # Camera ↔ image normalisation
@@ -156,14 +144,6 @@ def compute_calibration_from_square(
     micrometers_per_mirror_x = pixels_per_mirror_x * pixel_size_um
     micrometers_per_mirror_y = pixels_per_mirror_y * pixel_size_um
 
-    camera_width = camera_shape[0]
-    camera_height = camera_shape[1]
-
-    x_min_norm = x_min / max(camera_width - 1, 1)
-    x_max_norm = x_max / max(camera_width - 1, 1)
-    y_min_norm = y_min / max(camera_height - 1, 1)
-    y_max_norm = y_max / max(camera_height - 1, 1)
-
     return DMDCalibration(
         dmd_shape=dmd_shape,
         camera_shape=camera_shape,
@@ -171,12 +151,4 @@ def compute_calibration_from_square(
         camera_pixels_per_mirror=(pixels_per_mirror_x, pixels_per_mirror_y),
         camera_pixel_size_um=pixel_size_um,
         micrometers_per_mirror=(micrometers_per_mirror_x, micrometers_per_mirror_y),
-        X_min=0,
-        X_max=dmd_shape[0] - 1,
-        Y_min=0,
-        Y_max=dmd_shape[1] - 1,
-        x_min=x_min_norm,
-        x_max=x_max_norm,
-        y_min=y_min_norm,
-        y_max=y_max_norm,
     )

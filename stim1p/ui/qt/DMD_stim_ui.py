@@ -285,12 +285,24 @@ class Ui_widget_dmd_stim(object):
         self.verticalLayout_load_image = QVBoxLayout()
         self.verticalLayout_load_image.setObjectName(u"verticalLayout_load_image")
         self.verticalLayout_load_image.setContentsMargins(0, 0, -1, -1)
+        self.horizontalLayout_image_controls = QHBoxLayout()
+        self.horizontalLayout_image_controls.setObjectName(u"horizontalLayout_image_controls")
         self.pushButton_load_image = QPushButton(self.layoutWidget)
         self.pushButton_load_image.setObjectName(u"pushButton_load_image")
         icon7 = QIcon(QIcon.fromTheme(QIcon.ThemeIcon.InsertImage))
         self.pushButton_load_image.setIcon(icon7)
 
-        self.verticalLayout_load_image.addWidget(self.pushButton_load_image)
+        self.horizontalLayout_image_controls.addWidget(self.pushButton_load_image)
+
+        self.pushButton_reset_image_view = QPushButton(self.layoutWidget)
+        self.pushButton_reset_image_view.setObjectName(u"pushButton_reset_image_view")
+        icon8 = QIcon(QIcon.fromTheme(QIcon.ThemeIcon.ViewRefresh))
+        self.pushButton_reset_image_view.setIcon(icon8)
+
+        self.horizontalLayout_image_controls.addWidget(self.pushButton_reset_image_view)
+
+
+        self.verticalLayout_load_image.addLayout(self.horizontalLayout_image_controls)
 
         self.horizontalLayout_image_folder = QHBoxLayout()
         self.horizontalLayout_image_folder.setSpacing(5)
@@ -314,7 +326,6 @@ class Ui_widget_dmd_stim(object):
 
         self.pushButton_refresh_image = QPushButton(self.layoutWidget)
         self.pushButton_refresh_image.setObjectName(u"pushButton_refresh_image")
-        icon8 = QIcon(QIcon.fromTheme(QIcon.ThemeIcon.ViewRefresh))
         self.pushButton_refresh_image.setIcon(icon8)
 
         self.horizontalLayout_image_folder.addWidget(self.pushButton_refresh_image)
@@ -376,6 +387,7 @@ class Ui_widget_dmd_stim(object):
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_run), QCoreApplication.translate("widget_dmd_stim", u"Run", None))
         self.groupBox_console_output.setTitle(QCoreApplication.translate("widget_dmd_stim", u"Console output", None))
         self.pushButton_load_image.setText(QCoreApplication.translate("widget_dmd_stim", u"Load single image", None))
+        self.pushButton_reset_image_view.setText(QCoreApplication.translate("widget_dmd_stim", u"Reset image view", None))
         self.label_image_folder.setText(QCoreApplication.translate("widget_dmd_stim", u"Load last image from folder", None))
         self.pushButton_change_folder.setText("")
         self.pushButton_refresh_image.setText("")

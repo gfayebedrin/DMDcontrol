@@ -13,7 +13,6 @@ from PySide6.QtCore import (
     QRectF,
     Qt,
     QSettings,
-    QStandardPaths,
     QTimer,
 )
 from PySide6.QtGui import QTransform
@@ -639,18 +638,12 @@ class StimDMDWidget(QWidget):
                 if shape is None:
                     continue
                 axis_points = shape.get_points()
-                axis_um = self._axis_pixels_to_axis_micrometres(axis_points)
-                pattern_polys.append(axis_um)
+                micrometre_points = self._axis_pixels_to_micrometres(axis_points)
+                pattern_polys.append(micrometre_points)
                 pattern_shapes.append(shape.shape_type)
             patterns.append(pattern_polys)
             shape_types.append(pattern_shapes)
         timings_ms, durations_ms, sequence = self._read_table_ms()
-        axis_origin_um = (
-            self._axis_origin_micrometre() if self._axis_defined else None
-        )
-        axis_angle_deg = (
-            float(np.degrees(self._axis_angle_rad)) if self._axis_defined else None
-        )
         return PatternSequence(
             patterns=patterns,
             sequence=sequence,
@@ -658,8 +651,6 @@ class StimDMDWidget(QWidget):
             durations=[timedelta(milliseconds=int(d)) for d in durations_ms],
             descriptions=descriptions,
             shape_types=shape_types,
-            axis_origin_micrometre=axis_origin_um,
-            axis_angle_degrees=axis_angle_deg,
         )
 
     @model.setter
@@ -685,23 +676,9 @@ class StimDMDWidget(QWidget):
             else [["polygon"] * len(pattern) for pattern in model.patterns]
         )
 
-        if (
-            self._calibration is not None
-            and model.axis_origin_micrometre is not None
-            and model.axis_angle_degrees is not None
-        ):
-            origin_um = np.asarray(model.axis_origin_micrometre, dtype=float)
-            origin_camera = (
-                self._calibration.micrometre_to_camera(origin_um.reshape(2, 1)).T[0]
-            )
-            angle_rad = float(np.radians(model.axis_angle_degrees))
-            defined = True
-        else:
-            origin_camera = np.array([0.0, 0.0], dtype=float)
-            angle_rad = 0.0
-            defined = False
-
-        self._set_axis_state(origin_camera, angle_rad, defined)
+        # Keep whichever axis the user already defined; if none, make sure visuals stay in sync.
+        self._update_image_transform()
+        self._update_axis_visuals()
         for pat_idx, pattern in enumerate(model.patterns):
 
             root = QTreeWidgetItem([""])
@@ -727,11 +704,7 @@ class StimDMDWidget(QWidget):
                 node = QTreeWidgetItem([shape_kind])
                 root.addChild(node)
                 points_um = np.asarray(poly_pts, dtype=float)
-                points_axis = (
-                    self._axis_micrometres_to_axis_pixels(points_um)
-                    if self._calibration is not None
-                    else points_um
-                )
+                points_axis = self._micrometres_to_axis_pixels(points_um)
                 if shape_kind == "rectangle":
                     self.roi_manager.register_rectangle(node, points_axis)
                 else:
@@ -849,29 +822,22 @@ class StimDMDWidget(QWidget):
         mic = self._calibration.camera_to_micrometre(origin_vec.reshape(2, 1)).T[0]
         return np.asarray(mic, dtype=float)
 
-    def _axis_pixels_to_axis_micrometres(self, points: np.ndarray) -> np.ndarray:
+    def _axis_pixels_to_micrometres(self, points: np.ndarray) -> np.ndarray:
         if self._calibration is None:
             raise RuntimeError("A calibration is required for micrometre conversion.")
         arr = np.asarray(points, dtype=float)
         was_1d = arr.ndim == 1
         camera_pts = self._axis_to_camera(arr)
         mic_camera = self._calibration.camera_to_micrometre(camera_pts.T).T
-        origin_um = self._axis_origin_micrometre()
-        R_neg = self._rotation_matrix(-self._axis_angle_rad)
-        relative = mic_camera - origin_um
-        axis_um = (R_neg @ relative.T).T
-        return axis_um[0] if was_1d else axis_um
+        return mic_camera[0] if was_1d else mic_camera
 
-    def _axis_micrometres_to_axis_pixels(self, points_um: np.ndarray) -> np.ndarray:
+    def _micrometres_to_axis_pixels(self, points_um: np.ndarray) -> np.ndarray:
         if self._calibration is None:
             raise RuntimeError("A calibration is required for micrometre conversion.")
         arr = np.asarray(points_um, dtype=float)
         was_1d = arr.ndim == 1
         points_um = np.atleast_2d(arr)
-        origin_um = self._axis_origin_micrometre()
-        R_pos = self._rotation_matrix()
-        mic_camera = (R_pos @ points_um.T).T + origin_um
-        camera_pts = self._calibration.micrometre_to_camera(mic_camera.T).T
+        camera_pts = self._calibration.micrometre_to_camera(points_um.T).T
         axis_pts = self._camera_to_axis(camera_pts)
         return axis_pts[0] if was_1d else axis_pts
 
@@ -1017,56 +983,15 @@ class StimDMDWidget(QWidget):
             folder = os.path.dirname(last_image_path)
             if folder:
                 self.ui.lineEdit_image_folder_path.setText(folder)
-        self._load_saved_calibration_if_available()
+        QTimer.singleShot(0, self._ensure_calibration_available)
 
-    def _default_calibration_file_path(self) -> Path:
-        location = QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)
-        if not location:
-            location = os.path.join(Path.home(), ".stim1p")
-        base_path = Path(location).expanduser()
-        try:
-            base_path.mkdir(parents=True, exist_ok=True)
-        except Exception:
-            pass
-        return base_path / "last_calibration.h5"
-
-    def _load_saved_calibration_if_available(self) -> None:
-        candidates: list[Path] = []
-        stored_path = self._preferences.last_calibration_file_path()
+    def _ensure_calibration_available(self) -> None:
+        stored_path = self.last_calibration_file_path()
         if stored_path:
-            candidates.append(Path(stored_path).expanduser())
-        default_path = self._default_calibration_file_path()
-        if not candidates or candidates[0] != default_path:
-            candidates.append(default_path)
-        for path in candidates:
-            if not path or not path.exists():
-                continue
-            try:
-                calibration = saving.load_calibration(str(path))
-            except Exception as exc:
-                print(f"Failed to load stored calibration from {path}: {exc}")
-                continue
-            self.calibration = calibration
-            self.remember_calibration_file(str(path))
-            self._preferences.set_pixel_size(calibration.camera_pixel_size_um)
-            return
-
-    def _persist_calibration(self, calibration: DMDCalibration) -> None:
-        target_path = self._preferences.last_calibration_file_path()
-        if target_path:
-            path = Path(target_path).expanduser()
-        else:
-            path = self._default_calibration_file_path()
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-        except Exception:
-            pass
-        try:
-            saving.save_calibration(str(path), calibration)
-        except Exception as exc:
-            print(f"Failed to persist calibration to {path}: {exc}")
-            return
-        self.remember_calibration_file(str(path))
+            success, _ = self._load_calibration_from_path(stored_path)
+            if success:
+                return
+        self._calibrate_dmd()
 
     def _compute_fit_rect(self, width: int, height: int) -> QRectF:
         span = float(max(width, height))
@@ -1248,7 +1173,12 @@ class StimDMDWidget(QWidget):
         self._hist_widget.region.setRegion(levels)
 
     def _set_image(
-        self, image: np.ndarray, *, fit_to_view: bool = False, apply_axis: bool = True
+        self,
+        image: np.ndarray,
+        *,
+        fit_to_view: bool = False,
+        apply_axis: bool = True,
+        auto_contrast: bool = False,
     ) -> None:
         image = np.asarray(image)
         if image.ndim not in (2, 3):
@@ -1274,22 +1204,24 @@ class StimDMDWidget(QWidget):
         display_image = (
             image.T if image.ndim == 2 else np.transpose(image, axes=(1, 0, 2))
         )
-        auto_levels = self._image_item.image is None or previous_levels is None
-        levels = None if auto_levels else previous_levels
+        use_previous_levels = previous_levels is not None and not auto_contrast
+        auto_levels_flag = not use_previous_levels
+        levels = previous_levels if use_previous_levels else None
         self._image_item.setImage(
             display_image,
-            autoLevels=auto_levels,
+            autoLevels=auto_levels_flag,
             autoDownsample=False,
             levels=levels,
         )
         self._image_item.setRect(QRectF(0.0, 0.0, float(width), float(height)))
         self._image_item.setPos(0.0, 0.0)
-        if levels is None:
-            self._store_histogram_levels()
-        else:
-            self._hist_widget.region.setRegion(levels)
-
         self._current_image = image
+        if auto_contrast:
+            self._apply_auto_levels_clipped()
+        elif use_previous_levels and levels is not None:
+            self._hist_widget.region.setRegion(levels)
+        else:
+            self._store_histogram_levels()
         if apply_axis and self._axis_defined:
             self._update_image_transform()
             self._update_axis_visuals()
@@ -1322,11 +1254,77 @@ class StimDMDWidget(QWidget):
             if not path:
                 return
             image = np.array(Image.open(path))
-            self._set_image(image, fit_to_view=True)
+            self._set_image(image, fit_to_view=True, auto_contrast=True)
         except Exception:
             pass
 
     def _calibrate_dmd(self):
+        action = self._prompt_calibration_action()
+        if action is None:
+            return
+        if action == "load":
+            self._load_calibration_from_dialog()
+        elif action == "define":
+            self._define_new_calibration()
+
+    def _prompt_calibration_action(self) -> str | None:
+        prompt = QMessageBox(self)
+        prompt.setWindowTitle("Calibrate DMD")
+        prompt.setIcon(QMessageBox.Icon.Question)
+        prompt.setText("Choose how to obtain a DMD calibration.")
+        load_button = prompt.addButton(
+            "Load calibration file", QMessageBox.ButtonRole.ActionRole
+        )
+        define_button = prompt.addButton(
+            "Define new calibration", QMessageBox.ButtonRole.ActionRole
+        )
+        prompt.addButton(QMessageBox.StandardButton.Cancel)
+        if self._calibration is None:
+            prompt.setDefaultButton(define_button)
+        else:
+            prompt.setDefaultButton(load_button)
+        prompt.exec()
+        clicked = prompt.clickedButton()
+        if clicked is None:
+            return None
+        standard = prompt.standardButton(clicked)
+        if standard == QMessageBox.StandardButton.Cancel:
+            return None
+        if clicked is load_button:
+            return "load"
+        if clicked is define_button:
+            return "define"
+        return None
+
+    def _load_calibration_from_dialog(self) -> None:
+        last_path = self.last_calibration_file_path()
+        initial = ""
+        if last_path:
+            candidate = Path(str(last_path)).expanduser()
+            if candidate.exists():
+                initial = str(candidate)
+            else:
+                parent = candidate.parent
+                if parent.exists():
+                    initial = str(parent)
+        file_filter = "Calibration files (*.h5 *.hdf5);;All files (*)"
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select calibration file",
+            initial,
+            file_filter,
+        )
+        if not file_path:
+            return
+        success, error = self._load_calibration_from_path(file_path)
+        if not success:
+            QMessageBox.warning(
+                self,
+                "Calibration load error",
+                f"Unable to load calibration file:\n{error}",
+            )
+
+    def _define_new_calibration(self) -> None:
         initial_dir = self.ui.lineEdit_image_folder_path.text().strip()
         stored_image_path = self._preferences.last_calibration_image_path()
         if stored_image_path:
@@ -1365,7 +1363,12 @@ class StimDMDWidget(QWidget):
         selected_item = selected_items[0] if selected_items else None
         self.roi_manager.clear_visible_only()
 
-        self._set_image(calibration_image, fit_to_view=True, apply_axis=False)
+        self._set_image(
+            calibration_image,
+            fit_to_view=True,
+            apply_axis=False,
+            auto_contrast=True,
+        )
 
         polygon_points = self._prompt_calibration_rectangle()
         if polygon_points is None:
@@ -1415,7 +1418,6 @@ class StimDMDWidget(QWidget):
             return
 
         self.calibration = calibration
-        self._persist_calibration(calibration)
         print(
             "Updated DMD calibration: pixels/mirror=(%.3f, %.3f), µm/mirror=(%.3f, %.3f)"
             % (
@@ -1425,7 +1427,83 @@ class StimDMDWidget(QWidget):
                 calibration.micrometers_per_mirror[1],
             )
         )
+        self._prompt_save_calibration(calibration)
         self._restore_after_calibration(previous_image, previous_view, selected_item)
+
+    def _prompt_save_calibration(self, calibration: DMDCalibration) -> None:
+        response = QMessageBox.question(
+            self,
+            "Save calibration",
+            "Do you want to save this calibration to a file?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if response != QMessageBox.StandardButton.Yes:
+            return
+        last_path = self.last_calibration_file_path()
+        initial = ""
+        if last_path:
+            candidate = Path(str(last_path)).expanduser()
+            if candidate.exists():
+                initial = str(candidate)
+            else:
+                parent = candidate.parent
+                if parent.exists():
+                    initial = str(parent / candidate.name)
+        file_filter = "Calibration files (*.h5 *.hdf5);;All files (*)"
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save calibration",
+            initial,
+            file_filter,
+        )
+        if not file_path:
+            return
+        root, ext = os.path.splitext(file_path)
+        if not ext:
+            file_path = f"{file_path}.h5"
+        self._save_calibration_to_path(calibration, file_path)
+
+    def _save_calibration_to_path(
+        self, calibration: DMDCalibration, file_path: str
+    ) -> bool:
+        path = Path(str(file_path)).expanduser()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+        try:
+            saving.save_calibration(str(path), calibration)
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                "Save failed",
+                f"Unable to save calibration file:\n{exc}",
+            )
+            return False
+        self.remember_calibration_file(str(path))
+        print(f"Saved DMD calibration to {path}")
+        return True
+
+    def _load_calibration_from_path(self, path_str: str) -> tuple[bool, str | None]:
+        """Load calibration from disk and activate it."""
+        path = Path(str(path_str)).expanduser()
+        try:
+            calibration = saving.load_calibration(str(path))
+        except Exception as exc:
+            message = f"{path}: {exc}"
+            print(f"Failed to load stored calibration from {message}")
+            return False, message
+        self.calibration = calibration
+        self.remember_calibration_file(str(path))
+        try:
+            pixel_size = calibration.camera_pixel_size_um
+        except AttributeError:
+            pixel_size = None
+        if pixel_size is not None:
+            self._preferences.set_pixel_size(float(pixel_size))
+        print(f"Active DMD calibration: {path}")
+        return True, None
 
     def _prompt_calibration_rectangle(self) -> np.ndarray | None:
         prompt = QMessageBox(self)
@@ -1469,7 +1547,7 @@ class StimDMDWidget(QWidget):
         selected_item: QTreeWidgetItem | None,
     ) -> None:
         if previous_image is not None:
-            self._set_image(previous_image)
+            self._set_image(previous_image, auto_contrast=True)
             if previous_view_range is not None:
                 x_range, y_range = previous_view_range
                 self._get_view_box().setRange(
@@ -1515,7 +1593,7 @@ class StimDMDWidget(QWidget):
             return
         last_image = max(images, key=os.path.getmtime)
         image = np.array(Image.open(last_image))
-        self._set_image(image, fit_to_view=True)
+        self._set_image(image, fit_to_view=True, auto_contrast=True)
 
     def _show_grid(self):
         show = self.ui.pushButton_show_grid.isChecked()

@@ -31,12 +31,6 @@ def save_pattern_sequence(filepath: str, pattern_sequence: PatternSequence):
         pattern_sequence (PatternSequence): The pattern sequence to save.
     """
     with h5py.File(filepath, "w") as f:
-        axis_origin = pattern_sequence.axis_origin_micrometre
-        if axis_origin is not None:
-            f.create_dataset("axis_origin_um", data=np.asarray(axis_origin, dtype=float))
-        if pattern_sequence.axis_angle_degrees is not None:
-            f.attrs["axis_angle_deg"] = float(pattern_sequence.axis_angle_degrees)
-
         f.create_dataset(SEQUENCE, data=pattern_sequence.sequence)
         f.create_dataset(TIMINGS, data=pattern_sequence.timings_milliseconds)
         f.create_dataset(DURATIONS, data=pattern_sequence.durations_milliseconds)
@@ -123,17 +117,6 @@ def load_pattern_sequence(
         descriptions_value = descriptions if any_description else None
         shape_types_value = shape_types if any_non_polygon else None
 
-        if "axis_origin_um" in f:
-            axis_origin_um = f["axis_origin_um"][()]
-            axis_origin_um = np.asarray(axis_origin_um, dtype=float).reshape(2)
-        else:
-            axis_origin_um = None
-
-        axis_angle_deg_attr = f.attrs.get("axis_angle_deg")
-        axis_angle_deg = (
-            float(axis_angle_deg_attr) if axis_angle_deg_attr is not None else None
-        )
-
     return PatternSequence(
         patterns=patterns,
         sequence=sequence,
@@ -141,8 +124,6 @@ def load_pattern_sequence(
         durations=[timedelta(milliseconds=float(d)) for d in durations_ms],
         descriptions=descriptions_value,
         shape_types=shape_types_value,
-        axis_origin_micrometre=axis_origin_um,
-        axis_angle_degrees=axis_angle_deg,
     )
 
 

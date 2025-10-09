@@ -29,17 +29,29 @@ class PatternSequence:
     timings: list[timedelta]
     durations: list[timedelta]
     descriptions: list[str] | None = None
+    shape_types: list[list[str]] | None = None
 
     def __post_init__(self):
         if not (len(self.sequence) == len(self.timings) == len(self.durations)):
             raise ValueError(
                 "sequence, timings, and durations must all have the same length."
             )
-        
+
         if self.descriptions is not None and len(self.descriptions) != len(self.patterns):
             raise ValueError(
                 "descriptions must have the same length as patterns if provided."
             )
+
+        if self.shape_types is not None:
+            if len(self.shape_types) != len(self.patterns):
+                raise ValueError(
+                    "shape_types must have the same length as patterns if provided."
+                )
+            for idx, (shapes, polys) in enumerate(zip(self.shape_types, self.patterns)):
+                if len(shapes) != len(polys):
+                    raise ValueError(
+                        f"shape_types[{idx}] must have the same length as the corresponding pattern."
+                    )
 
     def __len__(self) -> int:
         """Return the length of the sequence."""
@@ -81,9 +93,11 @@ def play_pattern_sequence(
         timings[0] + delay >= timedelta()
     ), "Anticipation cannot be longer than the first timing."
 
+    transformed_patterns = pattern_sequence.patterns
+
     # Upload the patterns to the DMD
     dmd.frames = [
-        polygons_to_mask(pattern, calibration) for pattern in pattern_sequence.patterns
+        polygons_to_mask(pattern, calibration) for pattern in transformed_patterns
     ]
 
     # Schedule the frames to be shown

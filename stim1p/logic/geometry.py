@@ -88,8 +88,10 @@ def polygons_to_mask(polygons: list[np.ndarray], calibration: DMDCalibration):
     Convert a list of polygons to a boolean mask.
 
     Parameters:
-        polygons (list[ndarray]): list of polygons, where each polygon is a (N, 2) numpy array of vertices in image coordinates.
-        calibration (DMDCalibration): calibration parameters for converting coordinates.
+        polygons (list[ndarray]): list of polygons, where each polygon is a (N, 2)
+            numpy array of vertices expressed in micrometres.
+        calibration (DMDCalibration): calibration parameters for converting
+            coordinates.
 
     Returns:
         mask (ndarray): Boolean 2D mask with `True` inside the polygons and `False` outside.
@@ -97,7 +99,7 @@ def polygons_to_mask(polygons: list[np.ndarray], calibration: DMDCalibration):
     mask = np.zeros(calibration.dmd_shape, dtype=bool)
 
     for polygon in polygons:
-        polygon_dmd = calibration.image_to_dmd(polygon.T).T
+        polygon_dmd = calibration.micrometre_to_dmd(polygon.T).T
         mask |= polygon2mask(calibration.dmd_shape, polygon_dmd)
 
     return mask

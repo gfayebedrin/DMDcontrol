@@ -134,15 +134,15 @@ class Ui_widget_dmd_stim(object):
         self.gridLayout_patternsButtons = QGridLayout()
         self.gridLayout_patternsButtons.setObjectName(u"gridLayout_patternsButtons")
         self.gridLayout_patternsButtons.setContentsMargins(-1, 0, -1, -1)
-        self.pushButton_7 = QPushButton(self.tab_editor)
-        self.pushButton_7.setObjectName(u"pushButton_7")
+        self.pushButton_draw_rectangle = QPushButton(self.tab_editor)
+        self.pushButton_draw_rectangle.setObjectName(u"pushButton_draw_rectangle")
 
-        self.gridLayout_patternsButtons.addWidget(self.pushButton_7, 1, 0, 1, 1)
+        self.gridLayout_patternsButtons.addWidget(self.pushButton_draw_rectangle, 1, 0, 1, 1)
 
-        self.pushButton_add_roi = QPushButton(self.tab_editor)
-        self.pushButton_add_roi.setObjectName(u"pushButton_add_roi")
+        self.pushButton_draw_polygon = QPushButton(self.tab_editor)
+        self.pushButton_draw_polygon.setObjectName(u"pushButton_draw_polygon")
 
-        self.gridLayout_patternsButtons.addWidget(self.pushButton_add_roi, 1, 1, 1, 1)
+        self.gridLayout_patternsButtons.addWidget(self.pushButton_draw_polygon, 1, 1, 1, 1)
 
         self.pushButton_add_pattern = QPushButton(self.tab_editor)
         self.pushButton_add_pattern.setObjectName(u"pushButton_add_pattern")
@@ -285,12 +285,24 @@ class Ui_widget_dmd_stim(object):
         self.verticalLayout_load_image = QVBoxLayout()
         self.verticalLayout_load_image.setObjectName(u"verticalLayout_load_image")
         self.verticalLayout_load_image.setContentsMargins(0, 0, -1, -1)
+        self.horizontalLayout_image_controls = QHBoxLayout()
+        self.horizontalLayout_image_controls.setObjectName(u"horizontalLayout_image_controls")
         self.pushButton_load_image = QPushButton(self.layoutWidget)
         self.pushButton_load_image.setObjectName(u"pushButton_load_image")
         icon7 = QIcon(QIcon.fromTheme(QIcon.ThemeIcon.InsertImage))
         self.pushButton_load_image.setIcon(icon7)
 
-        self.verticalLayout_load_image.addWidget(self.pushButton_load_image)
+        self.horizontalLayout_image_controls.addWidget(self.pushButton_load_image)
+
+        self.pushButton_reset_image_view = QPushButton(self.layoutWidget)
+        self.pushButton_reset_image_view.setObjectName(u"pushButton_reset_image_view")
+        icon8 = QIcon(QIcon.fromTheme(QIcon.ThemeIcon.ViewRefresh))
+        self.pushButton_reset_image_view.setIcon(icon8)
+
+        self.horizontalLayout_image_controls.addWidget(self.pushButton_reset_image_view)
+
+
+        self.verticalLayout_load_image.addLayout(self.horizontalLayout_image_controls)
 
         self.horizontalLayout_image_folder = QHBoxLayout()
         self.horizontalLayout_image_folder.setSpacing(5)
@@ -314,7 +326,6 @@ class Ui_widget_dmd_stim(object):
 
         self.pushButton_refresh_image = QPushButton(self.layoutWidget)
         self.pushButton_refresh_image.setObjectName(u"pushButton_refresh_image")
-        icon8 = QIcon(QIcon.fromTheme(QIcon.ThemeIcon.ViewRefresh))
         self.pushButton_refresh_image.setIcon(icon8)
 
         self.horizontalLayout_image_folder.addWidget(self.pushButton_refresh_image)
@@ -355,8 +366,8 @@ class Ui_widget_dmd_stim(object):
         self.pushButton_save_patterns.setShortcut(QCoreApplication.translate("widget_dmd_stim", u"Ctrl+S", None))
 #endif // QT_CONFIG(shortcut)
         self.label_patterns.setText(QCoreApplication.translate("widget_dmd_stim", u"Patterns", None))
-        self.pushButton_7.setText(QCoreApplication.translate("widget_dmd_stim", u"Add rectangle", None))
-        self.pushButton_add_roi.setText(QCoreApplication.translate("widget_dmd_stim", u"Add polygon", None))
+        self.pushButton_draw_rectangle.setText(QCoreApplication.translate("widget_dmd_stim", u"Draw rectangle", None))
+        self.pushButton_draw_polygon.setText(QCoreApplication.translate("widget_dmd_stim", u"Draw polygon", None))
         self.pushButton_add_pattern.setText(QCoreApplication.translate("widget_dmd_stim", u"Add pattern", None))
         self.pushButton_remove_pattern.setText(QCoreApplication.translate("widget_dmd_stim", u"Delete", None))
         self.label_sequence.setText(QCoreApplication.translate("widget_dmd_stim", u"Sequence", None))
@@ -376,6 +387,7 @@ class Ui_widget_dmd_stim(object):
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_run), QCoreApplication.translate("widget_dmd_stim", u"Run", None))
         self.groupBox_console_output.setTitle(QCoreApplication.translate("widget_dmd_stim", u"Console output", None))
         self.pushButton_load_image.setText(QCoreApplication.translate("widget_dmd_stim", u"Load single image", None))
+        self.pushButton_reset_image_view.setText(QCoreApplication.translate("widget_dmd_stim", u"Reset image view", None))
         self.label_image_folder.setText(QCoreApplication.translate("widget_dmd_stim", u"Load last image from folder", None))
         self.pushButton_change_folder.setText("")
         self.pushButton_refresh_image.setText("")

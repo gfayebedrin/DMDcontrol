@@ -13,13 +13,30 @@ import pyqtgraph as pg
 from PySide6.QtWidgets import QTreeWidgetItem
 from PySide6.QtCore import QObject, Signal, QPointF
 
-class Polygon:
-    """Adapter around a pyqtgraph PolyLineROI tied to a tree item."""
-    def __init__(self, points: np.ndarray, item: QTreeWidgetItem):
+
+class _BaseShape:
+    """Base wrapper around a pyqtgraph ROI bound to a tree item."""
+
+    def __init__(self, item: QTreeWidgetItem, roi: pg.ROI, shape_type: str):
         self.item = item
-        self.roi = pg.PolyLineROI(points, closed=True)
-        # clicking the ROI selects the corresponding tree item
+        self.roi = roi
+        self.shape_type = shape_type
         self.roi.sigClicked.connect(lambda *_: self.item.setSelected(True))
+
+    def change_ref(self, center: QPointF, angle: float) -> None:
+        raise NotImplementedError
+
+    def get_points(self) -> np.ndarray:
+        raise NotImplementedError
+
+    def set_points(self, points: np.ndarray) -> None:
+        raise NotImplementedError
+
+
+class PolygonShape(_BaseShape):
+    def __init__(self, points: np.ndarray, item: QTreeWidgetItem):
+        roi = pg.PolyLineROI(points, closed=True)
+        super().__init__(item, roi, "polygon")
 
     def change_ref(self, center: QPointF, angle: float) -> None:
         self.roi.setPos(center)
@@ -31,64 +48,121 @@ class Polygon:
             pts.append([pos.x(), pos.y()])
         return np.asarray(pts, dtype=float)
 
-class RoiManager(QObject):
-    """Owns Polygon ROIs and their attachment to an ImageView."""
-    # Emits when visible ROIs changed (e.g., selection in tree)
-    visibilityChanged = Signal()
-    polygonEdited = Signal(QTreeWidgetItem)
+    def set_points(self, points: np.ndarray) -> None:
+        from PySide6.QtCore import QPointF
 
-    def __init__(self, image_view: pg.ImageView):
+        pts = [QPointF(float(x), float(y)) for x, y in np.asarray(points, dtype=float)]
+        self.roi.setPoints(pts, closed=True)
+        self.roi.setAngle(0.0)
+        self.roi.setPos(0.0, 0.0)
+
+
+class RectangleShape(_BaseShape):
+    def __init__(self, points: np.ndarray, item: QTreeWidgetItem):
+        points = np.asarray(points, dtype=float)
+        min_x = float(np.min(points[:, 0]))
+        max_x = float(np.max(points[:, 0]))
+        min_y = float(np.min(points[:, 1]))
+        max_y = float(np.max(points[:, 1]))
+        width = max(max_x - min_x, 1e-6)
+        height = max(max_y - min_y, 1e-6)
+        roi = pg.RectROI(
+            pos=(min_x, min_y),
+            size=(width, height),
+            rotatable=False,
+            removable=False,
+        )
+        super().__init__(item, roi, "rectangle")
+        self.roi.setAngle(0.0)
+
+    def change_ref(self, center: QPointF, angle: float) -> None:
+        self.roi.setPos(center.x(), center.y())
+        self.roi.setAngle(0.0)
+
+    def get_points(self) -> np.ndarray:
+        rect = self.roi.parentBounds()
+        if rect is None:
+            return np.zeros((0, 2), dtype=float)
+        x0 = float(rect.left())
+        y0 = float(rect.top())
+        x1 = float(rect.right())
+        y1 = float(rect.bottom())
+        return np.asarray([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], dtype=float)
+
+    def set_points(self, points: np.ndarray) -> None:
+        points = np.asarray(points, dtype=float)
+        min_x = float(np.min(points[:, 0]))
+        max_x = float(np.max(points[:, 0]))
+        min_y = float(np.min(points[:, 1]))
+        max_y = float(np.max(points[:, 1]))
+        width = max(max_x - min_x, 1e-6)
+        height = max(max_y - min_y, 1e-6)
+        self.roi.setAngle(0.0)
+        self.roi.setPos(min_x, min_y)
+        self.roi.setSize((width, height))
+
+
+class RoiManager(QObject):
+    """Owns shape ROIs and their attachment to an ImageView."""
+
+    visibilityChanged = Signal()
+    shapeEdited = Signal(QTreeWidgetItem)
+
+    def __init__(self, image_view: pg.GraphicsItem):
         super().__init__()
         self._image_view = image_view
-        self._polygons: dict[QTreeWidgetItem, Polygon] = {}
+        self._shapes: dict[QTreeWidgetItem, _BaseShape] = {}
         self._visible_rois: list[pg.ROI] = []
 
     # ---- Ownership / registration ----------------------------------------
-    def register_polygon(self, item: QTreeWidgetItem, points: np.ndarray) -> Polygon:
-        """Create and track a polygon for a tree item (not auto-shown)."""
-        poly = Polygon(points.astype("float64"), item)
-        poly.roi.sigRegionChangeFinished.connect(lambda *_: self.polygonEdited.emit(item))
-        self._polygons[item] = poly
-        return poly
+    def register_polygon(self, item: QTreeWidgetItem, points: np.ndarray) -> PolygonShape:
+        polygon = PolygonShape(points.astype("float64"), item)
+        polygon.roi.sigRegionChangeFinished.connect(
+            lambda *_: self.shapeEdited.emit(item)
+        )
+        self._shapes[item] = polygon
+        return polygon
+
+    def register_rectangle(
+        self, item: QTreeWidgetItem, points: np.ndarray
+    ) -> RectangleShape:
+        rectangle = RectangleShape(points.astype("float64"), item)
+        rectangle.roi.sigRegionChangeFinished.connect(
+            lambda *_: self.shapeEdited.emit(item)
+        )
+        self._shapes[item] = rectangle
+        return rectangle
 
     def unregister_item(self, item: QTreeWidgetItem) -> None:
-        """Remove polygon (and from view if visible)."""
-        poly = self._polygons.pop(item, None)
-        if poly is None:
+        shape = self._shapes.pop(item, None)
+        if shape is None:
             return
-        if poly.roi in self._visible_rois:
-            self._image_view.removeItem(poly.roi)
-            self._visible_rois.remove(poly.roi)
-        # let Qt/pyqtgraph GC the ROI; no explicit delete required
+        if shape.roi in self._visible_rois:
+            self._image_view.removeItem(shape.roi)
+            self._visible_rois.remove(shape.roi)
 
     def clear_all(self) -> None:
-        """Remove all ROIs from view and forget them."""
         for roi in self._visible_rois:
             self._image_view.removeItem(roi)
         self._visible_rois.clear()
-        self._polygons.clear()
+        self._shapes.clear()
         self.visibilityChanged.emit()
 
     # ---- View control -----------------------------------------------------
     def show_for_item(self, item: QTreeWidgetItem) -> None:
-        """
-        Show the ROI(s) corresponding to a selected tree item:
-        - if item is a leaf polygon: show that ROI
-        - if item is a pattern (has children): show all its children ROIs
-        """
         self.clear_visible_only()
-        if item in self._polygons:
-            self._add_visible(self._polygons[item].roi)
+        shape = self._shapes.get(item)
+        if shape is not None:
+            self._add_visible(shape.roi)
         else:
             for i in range(item.childCount()):
                 child = item.child(i)
-                poly = self._polygons.get(child)
-                if poly:
-                    self._add_visible(poly.roi)
+                child_shape = self._shapes.get(child)
+                if child_shape is not None:
+                    self._add_visible(child_shape.roi)
         self.visibilityChanged.emit()
 
     def clear_visible_only(self) -> None:
-        """Hide all currently shown ROIs but keep them registered."""
         for roi in self._visible_rois:
             self._image_view.removeItem(roi)
         self._visible_rois.clear()
@@ -98,28 +172,43 @@ class RoiManager(QObject):
         self._visible_rois.append(roi)
 
     # ---- Bulk ops ---------------------------------------------------------
-    def change_reference_all(self, center: QPointF, angle: float) -> None:
-        """Rebase all polygons to a new reference (crosshair pose)."""
-        for poly in self._polygons.values():
-            poly.change_ref(center, angle)
-
     def remove_items(self, items: Iterable[QTreeWidgetItem]) -> None:
-        """Unregister multiple items (pattern or polygon leaves)."""
         for it in items:
-            # If it's a pattern (has children), unregister all children
             for i in range(it.childCount()):
                 self.unregister_item(it.child(i))
-            # A leaf polygon may be passed directly
             self.unregister_item(it)
         self.visibilityChanged.emit()
 
     # ---- Introspection / export ------------------------------------------
     def have_item(self, item: QTreeWidgetItem) -> bool:
-        return item in self._polygons
+        return item in self._shapes
 
-    def get_polygon(self, item: QTreeWidgetItem) -> Polygon | None:
-        return self._polygons.get(item)
+    def get_shape(self, item: QTreeWidgetItem) -> _BaseShape | None:
+        return self._shapes.get(item)
 
-    def export_points(self) -> dict[QTreeWidgetItem, np.ndarray]:
-        """Return a mapping item -> Nx2 array for serialization."""
-        return {item: poly.get_points() for item, poly in self._polygons.items()}
+    def get_shape_type(self, item: QTreeWidgetItem) -> str | None:
+        shape = self._shapes.get(item)
+        return shape.shape_type if shape is not None else None
+
+    def export_shape_points(self) -> dict[QTreeWidgetItem, tuple[np.ndarray, str]]:
+        return {
+            item: (shape.get_points(), shape.shape_type)
+            for item, shape in self._shapes.items()
+        }
+
+    def update_shape(
+        self, item: QTreeWidgetItem, shape_type: str, points: np.ndarray
+    ) -> None:
+        shape_type = str(shape_type).lower()
+        points = np.asarray(points, dtype=float)
+        was_visible = False
+        existing = self._shapes.get(item)
+        if existing is not None:
+            was_visible = existing.roi in self._visible_rois
+            self.unregister_item(item)
+        if shape_type == "rectangle":
+            new_shape = self.register_rectangle(item, points)
+        else:
+            new_shape = self.register_polygon(item, points)
+        if was_visible:
+            self._add_visible(new_shape.roi)

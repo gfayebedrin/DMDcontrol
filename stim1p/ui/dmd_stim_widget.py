@@ -799,8 +799,12 @@ class StimDMDWidget(QWidget):
         except Exception:
             self._current_levels = None
 
-    def _load_image(self, path: str = "") -> None:
+    def _load_image(self, path: str | None = "") -> None:
         """Load an image from *path* or prompt the user to choose one."""
+
+        if not isinstance(path, str):
+            # QPushButton.clicked passes a boolean; treat any non-str as a fresh pick.
+            path = ""
 
         chosen_path = path.strip()
         if not chosen_path:

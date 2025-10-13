@@ -43,10 +43,26 @@ class PolygonShape(_BaseShape):
         self.roi.setAngle(angle)
 
     def get_points(self) -> np.ndarray:
-        pts = []
-        for _, pos in self.roi.getSceneHandlePositions():
-            pts.append([pos.x(), pos.y()])
-        return np.asarray(pts, dtype=float)
+        points: list[list[float]] = []
+        parent = self.roi.parentItem()
+        for handle_info in getattr(self.roi, "handles", []):
+            if handle_info.get("type") != "f":
+                continue
+            handle_item = handle_info.get("item")
+            if handle_item is None:
+                continue
+            local_pos = handle_item.pos()
+            if parent is not None:
+                mapped = self.roi.mapToParent(local_pos)
+            else:
+                # ROI currently detached from a view; fall back to local coords + translation.
+                mapped = QPointF(float(local_pos.x()), float(local_pos.y()))
+                roi_pos = self.roi.pos()
+                mapped += QPointF(float(roi_pos.x()), float(roi_pos.y()))
+            points.append([float(mapped.x()), float(mapped.y())])
+        if not points:
+            return np.zeros((0, 2), dtype=float)
+        return np.asarray(points, dtype=float)
 
     def set_points(self, points: np.ndarray) -> None:
         from PySide6.QtCore import QPointF
@@ -120,6 +136,8 @@ class RoiManager(QObject):
         polygon.roi.sigRegionChangeFinished.connect(
             lambda *_: self.shapeEdited.emit(item)
         )
+        self._image_view.addItem(polygon.roi)
+        polygon.roi.setVisible(False)
         self._shapes[item] = polygon
         return polygon
 
@@ -130,6 +148,8 @@ class RoiManager(QObject):
         rectangle.roi.sigRegionChangeFinished.connect(
             lambda *_: self.shapeEdited.emit(item)
         )
+        self._image_view.addItem(rectangle.roi)
+        rectangle.roi.setVisible(False)
         self._shapes[item] = rectangle
         return rectangle
 
@@ -138,13 +158,16 @@ class RoiManager(QObject):
         if shape is None:
             return
         if shape.roi in self._visible_rois:
-            self._image_view.removeItem(shape.roi)
             self._visible_rois.remove(shape.roi)
+        shape.roi.setVisible(False)
+        self._image_view.removeItem(shape.roi)
 
     def clear_all(self) -> None:
         for roi in self._visible_rois:
-            self._image_view.removeItem(roi)
+            roi.setVisible(False)
         self._visible_rois.clear()
+        for shape in self._shapes.values():
+            self._image_view.removeItem(shape.roi)
         self._shapes.clear()
         self.visibilityChanged.emit()
 
@@ -164,12 +187,15 @@ class RoiManager(QObject):
 
     def clear_visible_only(self) -> None:
         for roi in self._visible_rois:
-            self._image_view.removeItem(roi)
+            roi.setVisible(False)
         self._visible_rois.clear()
 
     def _add_visible(self, roi: pg.ROI) -> None:
-        self._image_view.addItem(roi)
-        self._visible_rois.append(roi)
+        if roi.scene() is None:
+            self._image_view.addItem(roi)
+        if roi not in self._visible_rois:
+            self._visible_rois.append(roi)
+        roi.setVisible(True)
 
     # ---- Bulk ops ---------------------------------------------------------
     def remove_items(self, items: Iterable[QTreeWidgetItem]) -> None:

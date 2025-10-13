@@ -43,6 +43,36 @@ from .capture_tools import (
 )
 
 
+class _MicrometreAxisItem(pg.AxisItem):
+    """Axis that renders tick labels in micrometres when calibration is available."""
+
+    def __init__(self, orientation: str, widget):
+        super().__init__(orientation=orientation)
+        self._widget = widget
+
+    def tickStrings(self, values, scale, spacing):
+        if self.logMode:
+            return super().tickStrings(values, scale, spacing)
+        per_unit = self._widget._axis_unit_scale_for_orientation(self.orientation)
+        if per_unit is None or not np.isfinite(per_unit) or per_unit == 0.0:
+            return super().tickStrings(values, scale, spacing)
+        spacing_um = abs(spacing * per_unit)
+        effective_spacing = max(spacing_um, 1e-9)
+        places = max(0, int(np.ceil(-np.log10(effective_spacing))))
+        places = min(places, 6)
+        strings: list[str] = []
+        for value in values:
+            val_um = float(value) * per_unit
+            if abs(val_um) < 1e-9:
+                val_um = 0.0
+            if abs(val_um) < 1e-3 or abs(val_um) >= 1e4:
+                label = f"{val_um:g}"
+            else:
+                label = f"{val_um:.{places}f}"
+            strings.append(label)
+        return strings
+
+
 class _CalibrationDialog(QDialog):
     """Collect user inputs required to build a calibration."""
 
@@ -99,9 +129,19 @@ class StimDMDWidget(QWidget):
         self.setObjectName(name)
         self.last_roi = None
         self.dmd = dmd
+        self._calibration: DMDCalibration | None = None
+        self._current_image: np.ndarray | None = None
+        self._current_levels: tuple[float, float] | None = None
+        self._axis_origin_camera = np.array([0.0, 0.0], dtype=float)
+        self._axis_angle_rad = 0.0
+        self._axis_defined = False
         # GraphicsLayoutWidget gives us fine control over plot + histogram layout.
         self._graphics_widget = pg.GraphicsLayoutWidget(parent=self)
-        self._plot_item = self._graphics_widget.addPlot()
+        axis_items = {
+            "bottom": _MicrometreAxisItem("bottom", self),
+            "left": _MicrometreAxisItem("left", self),
+        }
+        self._plot_item = self._graphics_widget.addPlot(axisItems=axis_items)
         self._view_box = self._plot_item.getViewBox()
         # Normalise the plot behaviour: no padding, camera-style orientation.
         if hasattr(self._view_box, "setPadding"):
@@ -114,6 +154,10 @@ class StimDMDWidget(QWidget):
         self._view_box.enableAutoRange(pg.ViewBox.XYAxes, enable=True)
         self._view_box.setLimits(minXRange=1.0, minYRange=1.0)
         self._view_box.setMenuEnabled(True)
+        for orientation in ("bottom", "left"):
+            axis = self._plot_item.getAxis(orientation)
+            axis.enableAutoSIPrefix(False)
+        self._update_axis_labels()
 
         # ImageItem renders the camera frame; keep it behind ROIs.
         self._image_item = pg.ImageItem()
@@ -149,7 +193,6 @@ class StimDMDWidget(QWidget):
         self._hist_widget = pg.HistogramLUTWidget(parent=self)
         self._hist_widget.setImageItem(self._image_item)
         self._hist_widget.setMinimumWidth(140)
-        self._current_levels: tuple[float, float] | None = None
         self._hist_widget.region.sigRegionChanged.connect(self._store_histogram_levels)
 
         self._image_container = QWidget(parent=self)
@@ -164,9 +207,6 @@ class StimDMDWidget(QWidget):
         self.tree_manager = tree_table_manager.TreeManager(self)
         self.table_manager = tree_table_manager.TableManager(self)
         self._preferences = CalibrationPreferences()
-        self._axis_origin_camera = np.array([0.0, 0.0], dtype=float)
-        self._axis_angle_rad = 0.0
-        self._axis_defined = False
         self._last_calibration_file_path: str = (
             self._preferences.last_calibration_file_path()
         )
@@ -174,8 +214,6 @@ class StimDMDWidget(QWidget):
         self._install_context_menu()
         self._apply_saved_preferences()
         self._console = console.Console(self.ui.plainTextEdit_console_output)
-        self._calibration: DMDCalibration | None = None
-        self._current_image: np.ndarray | None = None
         self._update_image_transform()
         self._update_axis_visuals()
 
@@ -297,6 +335,7 @@ class StimDMDWidget(QWidget):
     @calibration.setter
     def calibration(self, calibration: DMDCalibration | None):
         self._calibration = calibration
+        self._update_axis_labels()
 
     def _connect(self):
         """Wire UI widgets to their slots and manager helpers."""
@@ -410,6 +449,49 @@ class StimDMDWidget(QWidget):
         camera_pts = self._axis_to_camera(arr)
         mic_camera = self._calibration.camera_to_micrometre(camera_pts.T).T
         return mic_camera[0] if was_1d else mic_camera
+
+    def _axis_micrometre_scale(self) -> tuple[float, float] | None:
+        if self._calibration is None:
+            return None
+        try:
+            base = np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]], dtype=float)
+            mic = self._axis_pixels_to_micrometres(base)
+        except Exception:
+            return None
+        origin = mic[0]
+        x_vec = mic[1] - origin
+        y_vec = mic[2] - origin
+        scale_x = float(np.linalg.norm(x_vec))
+        scale_y = float(np.linalg.norm(y_vec))
+        if (
+            not np.isfinite(scale_x)
+            or not np.isfinite(scale_y)
+            or scale_x <= 0.0
+            or scale_y <= 0.0
+        ):
+            return None
+        return scale_x, scale_y
+
+    def _axis_unit_scale_for_orientation(self, orientation: str) -> float | None:
+        scales = self._axis_micrometre_scale()
+        if scales is None:
+            return None
+        orient = orientation.lower()
+        if orient in ("bottom", "top"):
+            return scales[0]
+        if orient in ("left", "right"):
+            return scales[1]
+        return None
+
+    def _update_axis_labels(self) -> None:
+        unit = "µm" if self._calibration is not None else "px"
+        axis_bottom = self._plot_item.getAxis("bottom")
+        axis_left = self._plot_item.getAxis("left")
+        axis_bottom.setLabel(f"X ({unit})")
+        axis_left.setLabel(f"Y ({unit})")
+        for axis in (axis_bottom, axis_left):
+            axis.picture = None
+            axis.update()
 
     def _micrometres_to_axis_pixels(self, points_um: np.ndarray) -> np.ndarray:
         if self._calibration is None:

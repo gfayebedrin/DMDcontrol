@@ -72,17 +72,41 @@
            </widget>
           </item>
           <item>
-           <widget class="QPushButton" name="pushButton_define_axis">
+          <widget class="QPushButton" name="pushButton_define_axis">
+           <property name="text">
+            <string>Define Axis</string>
+           </property>
+           <property name="checkable">
+            <bool>true</bool>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QLabel" name="label_axis_behaviour">
+           <property name="text">
+            <string>Patterns:</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QComboBox" name="comboBox_axis_behaviour">
+           <property name="sizeAdjustPolicy">
+            <enum>QComboBox::SizeAdjustPolicy::AdjustToMinimumContentsLengthWithIcon</enum>
+           </property>
+           <item>
             <property name="text">
-             <string>Define Axis</string>
+             <string>Move with image</string>
             </property>
-            <property name="checkable">
-             <bool>true</bool>
+           </item>
+           <item>
+            <property name="text">
+             <string>Stay fixed</string>
             </property>
-           </widget>
-          </item>
-         </layout>
-        </item>
+           </item>
+          </widget>
+         </item>
+        </layout>
+       </item>
         <item>
          <layout class="QHBoxLayout" name="horizontalLayout_patternLoading">
           <item>

@@ -15,12 +15,12 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QFont, QFontDatabase, QGradient, QIcon,
     QImage, QKeySequence, QLinearGradient, QPainter,
     QPalette, QPixmap, QRadialGradient, QTransform)
-from PySide6.QtWidgets import (QAbstractItemView, QApplication, QFrame, QGridLayout,
-    QGroupBox, QHBoxLayout, QHeaderView, QLabel,
-    QLineEdit, QPlainTextEdit, QPushButton, QSizePolicy,
-    QSplitter, QStackedWidget, QTabWidget, QTableWidget,
-    QTableWidgetItem, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
-    QWidget)
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QFrame,
+    QGridLayout, QGroupBox, QHBoxLayout, QHeaderView,
+    QLabel, QLineEdit, QPlainTextEdit, QPushButton,
+    QSizePolicy, QSplitter, QStackedWidget, QTabWidget,
+    QTableWidget, QTableWidgetItem, QTreeWidget, QTreeWidgetItem,
+    QVBoxLayout, QWidget)
 
 class Ui_widget_dmd_stim(object):
     def setupUi(self, widget_dmd_stim):
@@ -68,6 +68,19 @@ class Ui_widget_dmd_stim(object):
         self.pushButton_define_axis.setCheckable(True)
 
         self.horizontalLayout_6.addWidget(self.pushButton_define_axis)
+
+        self.label_axis_behaviour = QLabel(self.verticalLayoutWidget)
+        self.label_axis_behaviour.setObjectName(u"label_axis_behaviour")
+
+        self.horizontalLayout_6.addWidget(self.label_axis_behaviour)
+
+        self.comboBox_axis_behaviour = QComboBox(self.verticalLayoutWidget)
+        self.comboBox_axis_behaviour.addItem("")
+        self.comboBox_axis_behaviour.addItem("")
+        self.comboBox_axis_behaviour.setObjectName(u"comboBox_axis_behaviour")
+        self.comboBox_axis_behaviour.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+
+        self.horizontalLayout_6.addWidget(self.comboBox_axis_behaviour)
 
 
         self.verticalLayout_controls.addLayout(self.horizontalLayout_6)
@@ -355,6 +368,10 @@ class Ui_widget_dmd_stim(object):
         self.pushButton_calibrate_dmd.setText(QCoreApplication.translate("widget_dmd_stim", u"Calibrate DMD", None))
         self.pushButton_show_grid.setText(QCoreApplication.translate("widget_dmd_stim", u"Show grid", None))
         self.pushButton_define_axis.setText(QCoreApplication.translate("widget_dmd_stim", u"Define Axis", None))
+        self.label_axis_behaviour.setText(QCoreApplication.translate("widget_dmd_stim", u"Patterns:", None))
+        self.comboBox_axis_behaviour.setItemText(0, QCoreApplication.translate("widget_dmd_stim", u"Move with image", None))
+        self.comboBox_axis_behaviour.setItemText(1, QCoreApplication.translate("widget_dmd_stim", u"Stay fixed", None))
+
         self.label_file_path.setText(QCoreApplication.translate("widget_dmd_stim", u"Pattern sequence", None))
         self.pushButton_new_file.setText(QCoreApplication.translate("widget_dmd_stim", u"New", None))
         self.pushButton_load_patterns.setText(QCoreApplication.translate("widget_dmd_stim", u"Load", None))

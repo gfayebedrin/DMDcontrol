@@ -21,6 +21,8 @@ class CalibrationPreferences:
     _KEY_MIRRORS_X = "calibration/mirrors_x"
     _KEY_MIRRORS_Y = "calibration/mirrors_y"
     _KEY_PIXEL_SIZE = "calibration/pixel_size"
+    _KEY_AXIS_BEHAVIOUR = "axis/redefinition_mode"
+    _AXIS_BEHAVIOUR_DEFAULT = "move"
 
     def __init__(self) -> None:
         self._settings = QSettings(self._ORG, self._APP)
@@ -78,3 +80,14 @@ class CalibrationPreferences:
         self._settings.setValue(self._KEY_PIXEL_SIZE, float(pixel_size))
         self._settings.sync()
 
+    def axis_redefinition_mode(self) -> str:
+        value = self._to_str(self._settings.value(self._KEY_AXIS_BEHAVIOUR, self._AXIS_BEHAVIOUR_DEFAULT))
+        if value in ("move", "keep"):
+            return value
+        return self._AXIS_BEHAVIOUR_DEFAULT
+
+    def set_axis_redefinition_mode(self, mode: str) -> None:
+        if mode not in ("move", "keep"):
+            mode = self._AXIS_BEHAVIOUR_DEFAULT
+        self._settings.setValue(self._KEY_AXIS_BEHAVIOUR, mode)
+        self._settings.sync()

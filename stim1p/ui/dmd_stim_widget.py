@@ -4,8 +4,10 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 from datetime import timedelta
+from dataclasses import dataclass
 
 from PySide6.QtCore import (
+    QEvent,
     QRectF,
     Qt,
     QTimer,
@@ -18,11 +20,14 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
+    QLabel,
     QMessageBox,
+    QPushButton,
     QSpinBox,
     QTableWidgetItem,
     QTreeWidgetItem,
     QWidget,
+    QFrame,
 )
 import pyqtgraph as pg
 
@@ -73,6 +78,16 @@ class _MicrometreAxisItem(pg.AxisItem):
         return strings
 
 
+@dataclass
+class _AxisRedefinitionCache:
+    previous_origin: np.ndarray
+    previous_angle: float
+    new_origin: np.ndarray
+    new_angle: float
+    shapes: dict[QTreeWidgetItem, tuple[np.ndarray, str]]
+    behaviour: str | None = None
+
+
 class _CalibrationDialog(QDialog):
     """Collect user inputs required to build a calibration."""
 
@@ -121,6 +136,13 @@ class _CalibrationDialog(QDialog):
 class StimDMDWidget(QWidget):
     """Coordinate DMD calibration, ROI editing, and pattern sequencing UI."""
 
+    _AXIS_MODE_MOVE = "move"
+    _AXIS_MODE_KEEP = "keep"
+    _AXIS_BEHAVIOUR_LABELS = {
+        _AXIS_MODE_MOVE: "Move patterns with the image",
+        _AXIS_MODE_KEEP: "Keep patterns in place",
+    }
+
     def __init__(self, name="Stimulation DMD Widget", dmd=None, parent=None):
         """Build the widget layout and initialise runtime state."""
         super().__init__(parent=parent)
@@ -135,6 +157,7 @@ class StimDMDWidget(QWidget):
         self._axis_origin_camera = np.array([0.0, 0.0], dtype=float)
         self._axis_angle_rad = 0.0
         self._axis_defined = False
+        self._axis_redefine_cache: _AxisRedefinitionCache | None = None
         # GraphicsLayoutWidget gives us fine control over plot + histogram layout.
         self._graphics_widget = pg.GraphicsLayoutWidget(parent=self)
         axis_items = {
@@ -207,6 +230,8 @@ class StimDMDWidget(QWidget):
         self.tree_manager = tree_table_manager.TreeManager(self)
         self.table_manager = tree_table_manager.TableManager(self)
         self._preferences = CalibrationPreferences()
+        self._setup_axis_behaviour_controls()
+        self._setup_axis_feedback_banner()
         self._last_calibration_file_path: str = (
             self._preferences.last_calibration_file_path()
         )
@@ -365,6 +390,16 @@ class StimDMDWidget(QWidget):
         self.ui.treeWidget.itemChanged.connect(self.tree_manager.on_item_changed)
         self.ui.tableWidget.itemChanged.connect(self.table_manager.on_item_changed)
 
+    def eventFilter(self, obj, event):
+        if obj is getattr(self, "_axis_feedback_frame", None):
+            if event.type() in (QEvent.Type.Enter, QEvent.Type.HoverEnter):
+                if self._axis_feedback_timer.isActive():
+                    self._axis_feedback_timer.stop()
+            elif event.type() in (QEvent.Type.Leave, QEvent.Type.HoverLeave):
+                if self._axis_feedback_frame.isVisible():
+                    self._axis_feedback_timer.start(3000)
+        return super().eventFilter(obj, event)
+
     def closeEvent(self, event):
         self._console.restore_original_streams()
         super().closeEvent(event)
@@ -483,6 +518,143 @@ class StimDMDWidget(QWidget):
             return scales[1]
         return None
 
+    def _reproject_shapes_from_cache(self, cache: _AxisRedefinitionCache) -> None:
+        prev_origin = np.asarray(cache.previous_origin, dtype=float)
+        prev_angle = float(cache.previous_angle)
+        new_origin = np.asarray(cache.new_origin, dtype=float)
+        new_angle = float(cache.new_angle)
+        for item, (axis_points, shape_type) in cache.shapes.items():
+            axis_pts = np.asarray(axis_points, dtype=float)
+            camera_pts = self._axis_to_camera(axis_pts, origin=prev_origin, angle=prev_angle)
+            axis_pts_new = self._camera_to_axis(camera_pts, origin=new_origin, angle=new_angle)
+            self.roi_manager.update_shape(item, shape_type, axis_pts_new)
+
+    def _restore_shapes_from_cache(self, cache: _AxisRedefinitionCache) -> None:
+        for item, (axis_points, shape_type) in cache.shapes.items():
+            self.roi_manager.update_shape(item, shape_type, axis_points)
+
+    def _setup_axis_behaviour_controls(self) -> None:
+        combo = self.ui.comboBox_axis_behaviour
+        self._axis_behaviour_by_index = {
+            0: self._AXIS_MODE_MOVE,
+            1: self._AXIS_MODE_KEEP,
+        }
+        self._axis_behaviour_to_index = {
+            value: key for key, value in self._axis_behaviour_by_index.items()
+        }
+        for index, mode in self._axis_behaviour_by_index.items():
+            combo.setItemText(index, self._AXIS_BEHAVIOUR_LABELS[mode])
+        tooltip = (
+            "Choose what happens to existing patterns when the axis is redefined.\n"
+            "A banner appears after redefining so you can switch behaviour for that change."
+        )
+        combo.setToolTip(tooltip)
+        self.ui.label_axis_behaviour.setToolTip(tooltip)
+        stored_mode = self._preferences.axis_redefinition_mode()
+        index = self._axis_behaviour_to_index.get(stored_mode, 0)
+        combo.blockSignals(True)
+        combo.setCurrentIndex(index)
+        combo.blockSignals(False)
+        combo.currentIndexChanged.connect(self._on_axis_behaviour_combo_changed)
+
+    def _setup_axis_feedback_banner(self) -> None:
+        frame = QFrame(self.ui.verticalLayoutWidget)
+        frame.setObjectName("axisBehaviourBanner")
+        frame.setFrameShape(QFrame.Shape.StyledPanel)
+        frame.setVisible(False)
+        frame.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setSpacing(8)
+
+        label = QLabel(frame)
+        layout.addWidget(label, 1)
+
+        layout.addStretch(1)
+
+        move_btn = QPushButton(self._AXIS_BEHAVIOUR_LABELS[self._AXIS_MODE_MOVE], frame)
+        keep_btn = QPushButton(self._AXIS_BEHAVIOUR_LABELS[self._AXIS_MODE_KEEP], frame)
+        layout.addWidget(move_btn, 0)
+        layout.addWidget(keep_btn, 0)
+
+        self.ui.verticalLayout_controls.insertWidget(1, frame)
+
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        timer.timeout.connect(self._hide_axis_feedback_banner)
+
+        move_btn.clicked.connect(lambda: self._handle_axis_banner_choice(self._AXIS_MODE_MOVE))
+        keep_btn.clicked.connect(lambda: self._handle_axis_banner_choice(self._AXIS_MODE_KEEP))
+        frame.installEventFilter(self)
+
+        self._axis_feedback_frame = frame
+        self._axis_feedback_label = label
+        self._axis_feedback_move_button = move_btn
+        self._axis_feedback_keep_button = keep_btn
+        self._axis_feedback_timer = timer
+
+    def _axis_behaviour_from_index(self, index: int) -> str:
+        return self._axis_behaviour_by_index.get(index, self._AXIS_MODE_MOVE)
+
+    def _axis_behaviour_label(self, behaviour: str) -> str:
+        return self._AXIS_BEHAVIOUR_LABELS.get(behaviour, behaviour)
+
+    def _default_axis_behaviour(self) -> str:
+        return self._axis_behaviour_from_index(self.ui.comboBox_axis_behaviour.currentIndex())
+
+    def _update_axis_behaviour_combo(self, behaviour: str, *, update_preferences: bool) -> None:
+        index = self._axis_behaviour_to_index.get(behaviour)
+        if index is None:
+            return
+        combo = self.ui.comboBox_axis_behaviour
+        if combo.currentIndex() != index:
+            combo.blockSignals(True)
+            combo.setCurrentIndex(index)
+            combo.blockSignals(False)
+        if update_preferences:
+            self._preferences.set_axis_redefinition_mode(behaviour)
+
+    def _show_axis_feedback_banner(self, cache: _AxisRedefinitionCache) -> None:
+        if not cache.shapes:
+            self._hide_axis_feedback_banner()
+            return
+        behaviour = cache.behaviour or self._default_axis_behaviour()
+        description = self._axis_behaviour_label(behaviour)
+        self._axis_feedback_label.setText(f'Axis updated; patterns set to "{description}". Change?')
+        self._refresh_axis_feedback_buttons(behaviour)
+        self._axis_feedback_frame.setVisible(True)
+        self._axis_feedback_timer.start(6000)
+
+    def _hide_axis_feedback_banner(self) -> None:
+        self._axis_feedback_timer.stop()
+        self._axis_feedback_frame.setVisible(False)
+
+    def _refresh_axis_feedback_buttons(self, behaviour: str) -> None:
+        move_active = behaviour == self._AXIS_MODE_MOVE
+        keep_active = behaviour == self._AXIS_MODE_KEEP
+        self._axis_feedback_move_button.setEnabled(not move_active)
+        self._axis_feedback_move_button.setDefault(move_active)
+        self._axis_feedback_keep_button.setEnabled(not keep_active)
+        self._axis_feedback_keep_button.setDefault(keep_active)
+
+    def _handle_axis_banner_choice(self, behaviour: str) -> None:
+        cache = self._axis_redefine_cache
+        if cache is None:
+            return
+        if cache.behaviour == behaviour:
+            self._hide_axis_feedback_banner()
+            return
+        self._apply_axis_definition(cache, behaviour, fit_view=False)
+        self._update_axis_behaviour_combo(behaviour, update_preferences=True)
+        self._show_axis_feedback_banner(cache)
+
+    def _on_axis_behaviour_combo_changed(self, index: int) -> None:
+        behaviour = self._axis_behaviour_from_index(index)
+        self._preferences.set_axis_redefinition_mode(behaviour)
+        if self._axis_redefine_cache is not None:
+            self._refresh_axis_feedback_buttons(self._axis_redefine_cache.behaviour or behaviour)
+
     def _update_axis_labels(self) -> None:
         unit = "µm" if self._calibration is not None else "px"
         axis_bottom = self._plot_item.getAxis("bottom")
@@ -595,36 +767,36 @@ class StimDMDWidget(QWidget):
         self._update_image_transform()
         self._update_axis_visuals()
 
-    def _apply_axis_definition(self, origin_camera: np.ndarray, angle_rad: float) -> None:
-        """Rebase existing ROIs onto the supplied camera axis definition.
+    def _apply_axis_definition(
+        self,
+        cache: _AxisRedefinitionCache,
+        behaviour: str,
+        *,
+        fit_view: bool,
+    ) -> None:
+        """Apply an axis redefinition using the supplied behaviour."""
 
-        All stored shapes are round-tripped through camera coordinates so they
-        remain aligned after the axis origin or rotation changes.
-        """
-
-        # Reproject existing shapes into camera coordinates before updating the
-        # axis state so they can be reinterpreted in the new frame.
-        existing_shapes = self.roi_manager.export_shape_points()
-        camera_points_map: dict[QTreeWidgetItem, tuple[np.ndarray, str]] = {}
-        if existing_shapes:
-            prev_origin = self._axis_origin_camera.copy()
-            prev_angle = self._axis_angle_rad
-            for item, (axis_points, shape_type) in existing_shapes.items():
-                axis_pts = np.asarray(axis_points, dtype=float)
-                cam_pts = self._axis_to_camera(axis_pts, origin=prev_origin, angle=prev_angle)
-                camera_points_map[item] = (cam_pts, shape_type)
-
-        self._axis_origin_camera = np.asarray(origin_camera, dtype=float)
-        self._axis_angle_rad = float(angle_rad)
+        self._axis_origin_camera = np.asarray(cache.new_origin, dtype=float)
+        self._axis_angle_rad = float(cache.new_angle)
         self._axis_defined = True
         self._update_image_transform()
 
-        for item, (camera_pts, shape_type) in camera_points_map.items():
-            axis_pts = self._camera_to_axis(camera_pts)
-            self.roi_manager.update_shape(item, shape_type, axis_pts)
+        if cache.shapes:
+            if (
+                behaviour == self._AXIS_MODE_MOVE
+                and cache.behaviour != self._AXIS_MODE_MOVE
+            ):
+                self._reproject_shapes_from_cache(cache)
+            elif (
+                behaviour == self._AXIS_MODE_KEEP
+                and cache.behaviour not in (None, self._AXIS_MODE_KEEP)
+            ):
+                self._restore_shapes_from_cache(cache)
+        cache.behaviour = behaviour
 
         self._update_axis_visuals()
-        self._fit_view_to_image()
+        if fit_view:
+            self._fit_view_to_image()
 
     def _install_context_menu(self) -> None:
         try:
@@ -1286,7 +1458,24 @@ class StimDMDWidget(QWidget):
         origin_camera = self._axis_to_camera(origin_axis)
         direction_camera = self._rotation_matrix() @ vector_axis
         angle_camera = float(np.arctan2(direction_camera[1], direction_camera[0]))
-        self._apply_axis_definition(origin_camera, angle_camera)
+        shapes_export = {
+            item: (np.asarray(points, dtype=float), shape_type)
+            for item, (points, shape_type) in self.roi_manager.export_shape_points().items()
+        }
+        cache = _AxisRedefinitionCache(
+            previous_origin=self._axis_origin_camera.copy(),
+            previous_angle=self._axis_angle_rad,
+            new_origin=np.asarray(origin_camera, dtype=float),
+            new_angle=angle_camera,
+            shapes=shapes_export,
+        )
+        self._axis_redefine_cache = cache
+        behaviour = self._default_axis_behaviour()
+        self._apply_axis_definition(cache, behaviour, fit_view=True)
+        if cache.shapes:
+            self._show_axis_feedback_banner(cache)
+        else:
+            self._hide_axis_feedback_banner()
 
     def _new_model(self):
         self.model = PatternSequence(

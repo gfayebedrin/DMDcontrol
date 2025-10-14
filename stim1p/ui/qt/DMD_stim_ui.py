@@ -16,11 +16,12 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QImage, QKeySequence, QLinearGradient, QPainter,
     QPalette, QPixmap, QRadialGradient, QTransform)
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDoubleSpinBox,
-    QFormLayout, QFrame, QGridLayout, QGroupBox, QHBoxLayout,
-    QHeaderView, QLabel, QLineEdit, QPlainTextEdit,
-    QPushButton, QSizePolicy, QSpacerItem, QSplitter,
-    QStackedWidget, QTabWidget, QTableWidget, QTableWidgetItem,
-    QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
+    QFormLayout, QFrame, QGridLayout, QGroupBox,
+    QHBoxLayout, QHeaderView, QLabel, QLineEdit,
+    QPlainTextEdit, QPushButton, QSizePolicy, QSpacerItem,
+    QSplitter, QStackedWidget, QTabWidget, QTableWidget,
+    QTableWidgetItem, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
+    QWidget)
 
 class Ui_widget_dmd_stim(object):
     def setupUi(self, widget_dmd_stim):
@@ -146,7 +147,6 @@ class Ui_widget_dmd_stim(object):
 
         self.groupBox_roi_properties = QGroupBox(self.tab_editor)
         self.groupBox_roi_properties.setObjectName(u"groupBox_roi_properties")
-        self.groupBox_roi_properties.setCheckable(False)
         self.verticalLayout_roi_properties = QVBoxLayout(self.groupBox_roi_properties)
         self.verticalLayout_roi_properties.setObjectName(u"verticalLayout_roi_properties")
         self.stackedWidget_roi_properties = QStackedWidget(self.groupBox_roi_properties)
@@ -171,13 +171,14 @@ class Ui_widget_dmd_stim(object):
         self.verticalLayout_roi_polygon = QVBoxLayout(self.page_roi_polygon)
         self.verticalLayout_roi_polygon.setObjectName(u"verticalLayout_roi_polygon")
         self.tableWidget_polygon_points = QTableWidget(self.page_roi_polygon)
-        self.tableWidget_polygon_points.setObjectName(u"tableWidget_polygon_points")
-        self.tableWidget_polygon_points.setColumnCount(2)
-        self.tableWidget_polygon_points.setRowCount(0)
+        if (self.tableWidget_polygon_points.columnCount() < 2):
+            self.tableWidget_polygon_points.setColumnCount(2)
         __qtablewidgetitem = QTableWidgetItem()
         self.tableWidget_polygon_points.setHorizontalHeaderItem(0, __qtablewidgetitem)
         __qtablewidgetitem1 = QTableWidgetItem()
         self.tableWidget_polygon_points.setHorizontalHeaderItem(1, __qtablewidgetitem1)
+        self.tableWidget_polygon_points.setObjectName(u"tableWidget_polygon_points")
+        self.tableWidget_polygon_points.setColumnCount(2)
 
         self.verticalLayout_roi_polygon.addWidget(self.tableWidget_polygon_points)
 
@@ -219,6 +220,7 @@ class Ui_widget_dmd_stim(object):
         self.stackedWidget_roi_properties.addWidget(self.page_roi_rectangle)
 
         self.verticalLayout_roi_properties.addWidget(self.stackedWidget_roi_properties)
+
 
         self.verticalLayout_patterns.addWidget(self.groupBox_roi_properties)
 
@@ -277,12 +279,12 @@ class Ui_widget_dmd_stim(object):
         self.tableWidget = QTableWidget(self.tab_editor)
         if (self.tableWidget.columnCount() < 3):
             self.tableWidget.setColumnCount(3)
-        __qtablewidgetitem = QTableWidgetItem()
-        self.tableWidget.setHorizontalHeaderItem(0, __qtablewidgetitem)
-        __qtablewidgetitem1 = QTableWidgetItem()
-        self.tableWidget.setHorizontalHeaderItem(1, __qtablewidgetitem1)
         __qtablewidgetitem2 = QTableWidgetItem()
-        self.tableWidget.setHorizontalHeaderItem(2, __qtablewidgetitem2)
+        self.tableWidget.setHorizontalHeaderItem(0, __qtablewidgetitem2)
+        __qtablewidgetitem3 = QTableWidgetItem()
+        self.tableWidget.setHorizontalHeaderItem(1, __qtablewidgetitem3)
+        __qtablewidgetitem4 = QTableWidgetItem()
+        self.tableWidget.setHorizontalHeaderItem(2, __qtablewidgetitem4)
         self.tableWidget.setObjectName(u"tableWidget")
         self.tableWidget.setDragEnabled(True)
         self.tableWidget.setDragDropOverwriteMode(False)
@@ -476,12 +478,12 @@ class Ui_widget_dmd_stim(object):
         self.pushButton_add_pattern.setText(QCoreApplication.translate("widget_dmd_stim", u"Add pattern", None))
         self.pushButton_remove_pattern.setText(QCoreApplication.translate("widget_dmd_stim", u"Delete", None))
         self.label_sequence.setText(QCoreApplication.translate("widget_dmd_stim", u"Sequence", None))
-        ___qtablewidgetitem = self.tableWidget.horizontalHeaderItem(0)
-        ___qtablewidgetitem.setText(QCoreApplication.translate("widget_dmd_stim", u"Timing (ms)", None));
-        ___qtablewidgetitem1 = self.tableWidget.horizontalHeaderItem(1)
-        ___qtablewidgetitem1.setText(QCoreApplication.translate("widget_dmd_stim", u"Duration (ms)", None));
-        ___qtablewidgetitem2 = self.tableWidget.horizontalHeaderItem(2)
-        ___qtablewidgetitem2.setText(QCoreApplication.translate("widget_dmd_stim", u"Pattern", None));
+        ___qtablewidgetitem2 = self.tableWidget.horizontalHeaderItem(0)
+        ___qtablewidgetitem2.setText(QCoreApplication.translate("widget_dmd_stim", u"Timing (ms)", None));
+        ___qtablewidgetitem3 = self.tableWidget.horizontalHeaderItem(1)
+        ___qtablewidgetitem3.setText(QCoreApplication.translate("widget_dmd_stim", u"Duration (ms)", None));
+        ___qtablewidgetitem4 = self.tableWidget.horizontalHeaderItem(2)
+        ___qtablewidgetitem4.setText(QCoreApplication.translate("widget_dmd_stim", u"Pattern", None));
         self.pushButton_add_row.setText(QCoreApplication.translate("widget_dmd_stim", u"Add row", None))
         self.pushButton_remove_row.setText(QCoreApplication.translate("widget_dmd_stim", u"Remove row", None))
         self.pushButton_3.setText(QCoreApplication.translate("widget_dmd_stim", u"Add series...", None))

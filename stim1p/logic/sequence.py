@@ -106,9 +106,15 @@ def play_pattern_sequence(
         transformed_patterns = pattern_sequence.patterns
 
     # Upload the patterns to the DMD
+<<<<<<< Updated upstream
     dmd.frames = [
         polygons_to_mask(pattern, calibration) for pattern in transformed_patterns
     ]
+=======
+    dmd.frames = np.array([
+        polygons_to_mask(pattern, calibration) for pattern in pattern_sequence.patterns
+    ])
+>>>>>>> Stashed changes
 
     # Schedule the frames to be shown
     scheduler = sched.scheduler()

@@ -1,5 +1,6 @@
 import os
 import glob
+import math
 from pathlib import Path
 import numpy as np
 from PIL import Image
@@ -14,15 +15,18 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import QTransform
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
+    QCheckBox,
     QHBoxLayout,
     QLabel,
     QMessageBox,
     QPushButton,
+    QHeaderView,
     QSpinBox,
     QTableWidgetItem,
     QTreeWidgetItem,
@@ -34,6 +38,12 @@ import pyqtgraph as pg
 from ..logic.calibration import (
     DMDCalibration,
     compute_calibration_from_square,
+)
+from ..logic.geometry import (
+    AxisDefinition,
+    axis_micrometre_scale,
+    axis_micrometre_to_axis_pixels,
+    axis_pixels_to_axis_micrometre,
 )
 from ..logic.sequence import PatternSequence
 from ..logic import saving
@@ -97,22 +107,18 @@ class _CalibrationDialog(QDialog):
         *,
         default_mirrors: tuple[int, int] = (100, 100),
         default_pixel_size: float = 1.0,
+        default_invert_axes: bool = False,
     ):
         super().__init__(parent)
         self.setWindowTitle("Calibrate DMD")
         layout = QFormLayout(self)
 
-        self._mirror_x = QSpinBox(self)
-        self._mirror_x.setRange(1, 8192)
-        default_mirror_x = max(1, min(8192, int(default_mirrors[0])))
-        self._mirror_x.setValue(default_mirror_x)
-        layout.addRow("Mirrors (X)", self._mirror_x)
-
-        self._mirror_y = QSpinBox(self)
-        self._mirror_y.setRange(1, 8192)
-        default_mirror_y = max(1, min(8192, int(default_mirrors[1])))
-        self._mirror_y.setValue(default_mirror_y)
-        layout.addRow("Mirrors (Y)", self._mirror_y)
+        self._mirror_size = QSpinBox(self)
+        self._mirror_size.setRange(1, 8192)
+        default_avg = 0.5 * (float(default_mirrors[0]) + float(default_mirrors[1]))
+        default_size = max(1, min(8192, int(round(default_avg))))
+        self._mirror_size.setValue(default_size)
+        layout.addRow("Square size (mirrors)", self._mirror_size)
 
         self._pixel_size = QDoubleSpinBox(self)
         self._pixel_size.setRange(1e-6, 10_000.0)
@@ -120,6 +126,11 @@ class _CalibrationDialog(QDialog):
         clamped_size = max(self._pixel_size.minimum(), min(self._pixel_size.maximum(), float(default_pixel_size)))
         self._pixel_size.setValue(clamped_size)
         layout.addRow("Camera pixel size (µm)", self._pixel_size)
+
+        self._invert_axes = QCheckBox(self)
+        self._invert_axes.setChecked(bool(default_invert_axes))
+        self._invert_axes.setText("Flip DMD axes (X→X−x, Y→Y−y)")
+        layout.addRow(self._invert_axes)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
@@ -129,8 +140,8 @@ class _CalibrationDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addRow(buttons)
 
-    def values(self) -> tuple[int, int, float]:
-        return self._mirror_x.value(), self._mirror_y.value(), self._pixel_size.value()
+    def values(self) -> tuple[int, float, bool]:
+        return self._mirror_size.value(), self._pixel_size.value(), self._invert_axes.isChecked()
 
 
 class StimDMDWidget(QWidget):
@@ -230,6 +241,10 @@ class StimDMDWidget(QWidget):
         self.tree_manager = tree_table_manager.TreeManager(self)
         self.table_manager = tree_table_manager.TableManager(self)
         self._preferences = CalibrationPreferences()
+        self._roi_properties_item: QTreeWidgetItem | None = None
+        self._updating_roi_properties = False
+        self._setup_roi_properties_panel()
+        self.roi_manager.shapeEdited.connect(self._on_roi_shape_edited)
         self._setup_axis_behaviour_controls()
         self._setup_axis_feedback_banner()
         self._last_calibration_file_path: str = (
@@ -295,6 +310,7 @@ class StimDMDWidget(QWidget):
     def model(self, model: PatternSequence):
         self.ui.treeWidget.clear()
         self.roi_manager.clear_all()
+        self._set_roi_properties_item(None)
         self._next_pattern_id = 0
         if (
             self._calibration is None
@@ -387,8 +403,23 @@ class StimDMDWidget(QWidget):
         self.ui.treeWidget.itemClicked.connect(
             lambda item, _col: self.roi_manager.show_for_item(item)
         )
+        self.ui.treeWidget.itemSelectionChanged.connect(
+            self._on_tree_selection_changed
+        )
         self.ui.treeWidget.itemChanged.connect(self.tree_manager.on_item_changed)
         self.ui.tableWidget.itemChanged.connect(self.table_manager.on_item_changed)
+        self.ui.tableWidget_polygon_points.itemChanged.connect(
+            self._on_polygon_point_changed
+        )
+        self.ui.doubleSpinBox_rect_width.valueChanged.connect(
+            self._on_rectangle_property_changed
+        )
+        self.ui.doubleSpinBox_rect_height.valueChanged.connect(
+            self._on_rectangle_property_changed
+        )
+        self.ui.doubleSpinBox_rect_angle.valueChanged.connect(
+            self._on_rectangle_property_changed
+        )
 
     def eventFilter(self, obj, event):
         if obj is getattr(self, "_axis_feedback_frame", None):
@@ -413,6 +444,10 @@ class StimDMDWidget(QWidget):
 
     def _get_view_box(self) -> pg.ViewBox:
         return self._view_box
+
+    def _axis_definition(self) -> AxisDefinition:
+        origin = tuple(float(v) for v in self._axis_origin_camera.reshape(2))
+        return AxisDefinition(origin_camera=origin, angle_rad=float(self._axis_angle_rad))
 
     def _rotation_matrix(self, angle: float | None = None) -> np.ndarray:
         angle = self._axis_angle_rad if angle is None else float(angle)
@@ -479,25 +514,21 @@ class StimDMDWidget(QWidget):
     def _axis_pixels_to_micrometres(self, points: np.ndarray) -> np.ndarray:
         if self._calibration is None:
             raise RuntimeError("A calibration is required for micrometre conversion.")
-        arr = np.asarray(points, dtype=float)
-        was_1d = arr.ndim == 1
-        camera_pts = self._axis_to_camera(arr)
-        mic_camera = self._calibration.camera_to_micrometre(camera_pts.T).T
-        return mic_camera[0] if was_1d else mic_camera
+        return axis_pixels_to_axis_micrometre(
+            points, self._axis_definition(), self._calibration
+        )
 
     def _axis_micrometre_scale(self) -> tuple[float, float] | None:
         if self._calibration is None:
             return None
         try:
-            base = np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]], dtype=float)
-            mic = self._axis_pixels_to_micrometres(base)
+            scales = axis_micrometre_scale(
+                self._axis_definition(), self._calibration
+            )
         except Exception:
             return None
-        origin = mic[0]
-        x_vec = mic[1] - origin
-        y_vec = mic[2] - origin
-        scale_x = float(np.linalg.norm(x_vec))
-        scale_y = float(np.linalg.norm(y_vec))
+        scale_x = float(scales[0])
+        scale_y = float(scales[1])
         if (
             not np.isfinite(scale_x)
             or not np.isfinite(scale_y)
@@ -668,12 +699,200 @@ class StimDMDWidget(QWidget):
     def _micrometres_to_axis_pixels(self, points_um: np.ndarray) -> np.ndarray:
         if self._calibration is None:
             raise RuntimeError("A calibration is required for micrometre conversion.")
-        arr = np.asarray(points_um, dtype=float)
-        was_1d = arr.ndim == 1
-        points_um = np.atleast_2d(arr)
-        camera_pts = self._calibration.micrometre_to_camera(points_um.T).T
-        axis_pts = self._camera_to_axis(camera_pts)
-        return axis_pts[0] if was_1d else axis_pts
+        return axis_micrometre_to_axis_pixels(
+            points_um, self._axis_definition(), self._calibration
+        )
+
+    def _setup_roi_properties_panel(self) -> None:
+        stack = self.ui.stackedWidget_roi_properties
+        stack.setCurrentWidget(self.ui.page_roi_placeholder)
+        table = self.ui.tableWidget_polygon_points
+        table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectItems)
+        table.setEditTriggers(QAbstractItemView.EditTrigger.AllEditTriggers)
+        table.verticalHeader().setVisible(False)
+        header = table.horizontalHeader()
+        header.setStretchLastSection(True)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        for spin in (
+            self.ui.doubleSpinBox_rect_width,
+            self.ui.doubleSpinBox_rect_height,
+        ):
+            spin.setDecimals(6)
+            spin.setMinimum(1e-6)
+            spin.setMaximum(1e9)
+            spin.setSingleStep(0.1)
+        self.ui.doubleSpinBox_rect_angle.setDecimals(3)
+        self.ui.doubleSpinBox_rect_angle.setRange(-180.0, 180.0)
+        self.ui.doubleSpinBox_rect_angle.setSingleStep(1.0)
+
+    def _show_roi_placeholder(self) -> None:
+        table = self.ui.tableWidget_polygon_points
+        self._updating_roi_properties = True
+        try:
+            table.blockSignals(True)
+            table.setRowCount(0)
+        finally:
+            table.blockSignals(False)
+            self._updating_roi_properties = False
+        self.ui.stackedWidget_roi_properties.setCurrentWidget(
+            self.ui.page_roi_placeholder
+        )
+
+    def _populate_polygon_properties(self, shape: roi_manager.PolygonShape) -> None:
+        points = np.asarray(shape.get_points(), dtype=float)
+        table = self.ui.tableWidget_polygon_points
+        self._updating_roi_properties = True
+        try:
+            table.blockSignals(True)
+            table.setRowCount(points.shape[0])
+            for row in range(points.shape[0]):
+                for col in range(2):
+                    value = float(points[row, col]) if points.size else 0.0
+                    text = f"{value:.6f}"
+                    existing = table.item(row, col)
+                    if existing is None:
+                        table.setItem(row, col, QTableWidgetItem(text))
+                    else:
+                        existing.setText(text)
+        finally:
+            table.blockSignals(False)
+            self._updating_roi_properties = False
+        self.ui.stackedWidget_roi_properties.setCurrentWidget(
+            self.ui.page_roi_polygon
+        )
+
+    def _populate_rectangle_properties(
+        self, shape: roi_manager.RectangleShape
+    ) -> None:
+        state = dict(shape.roi.state)
+        width, height = state.get("size", (0.0, 0.0))
+        angle = float(state.get("angle", 0.0))
+        width = float(width)
+        height = float(height)
+        spins = (
+            self.ui.doubleSpinBox_rect_width,
+            self.ui.doubleSpinBox_rect_height,
+            self.ui.doubleSpinBox_rect_angle,
+        )
+        values = (width, height, angle)
+        self._updating_roi_properties = True
+        try:
+            for spin, value in zip(spins, values):
+                spin.blockSignals(True)
+                spin.setValue(value)
+        finally:
+            for spin in spins:
+                spin.blockSignals(False)
+            self._updating_roi_properties = False
+        self.ui.stackedWidget_roi_properties.setCurrentWidget(
+            self.ui.page_roi_rectangle
+        )
+
+    def _refresh_roi_properties(self) -> None:
+        item = self._roi_properties_item
+        if item is None:
+            self._show_roi_placeholder()
+            return
+        shape = self.roi_manager.get_shape(item)
+        if shape is None:
+            self._roi_properties_item = None
+            self._show_roi_placeholder()
+            return
+        shape_type = str(shape.shape_type).lower()
+        if shape_type == "rectangle":
+            self._populate_rectangle_properties(shape)
+        elif shape_type == "polygon":
+            self._populate_polygon_properties(shape)
+        else:
+            self._show_roi_placeholder()
+
+    def _set_roi_properties_item(self, item: QTreeWidgetItem | None) -> None:
+        if item is None or not self.roi_manager.have_item(item):
+            self._roi_properties_item = None
+            self._show_roi_placeholder()
+            return
+        self._roi_properties_item = item
+        self._refresh_roi_properties()
+
+    def _on_tree_selection_changed(self) -> None:
+        items = self.ui.treeWidget.selectedItems()
+        if not items:
+            self.roi_manager.clear_visible_only()
+            self._set_roi_properties_item(None)
+            return
+        self.roi_manager.show_for_item(items[0])
+        roi_item = next(
+            (candidate for candidate in items if self.roi_manager.have_item(candidate)),
+            None,
+        )
+        self._set_roi_properties_item(roi_item)
+
+    def _on_roi_shape_edited(self, item: QTreeWidgetItem) -> None:
+        if item is self._roi_properties_item:
+            self._refresh_roi_properties()
+
+    def _on_polygon_point_changed(self, table_item: QTableWidgetItem) -> None:
+        if self._updating_roi_properties or table_item is None:
+            return
+        item = self._roi_properties_item
+        if item is None:
+            return
+        shape = self.roi_manager.get_shape(item)
+        if shape is None or str(shape.shape_type).lower() != "polygon":
+            return
+        try:
+            value = float(table_item.text())
+        except (TypeError, ValueError):
+            self._refresh_roi_properties()
+            return
+        points = np.asarray(shape.get_points(), dtype=float)
+        row = table_item.row()
+        col = table_item.column()
+        if row < 0 or col < 0:
+            return
+        if row >= points.shape[0] or col >= points.shape[1]:
+            return
+        points[row, col] = value
+        shape.set_points(points)
+        self.roi_manager.shapeEdited.emit(item)
+        self._refresh_roi_properties()
+
+    def _on_rectangle_property_changed(self, _value: float) -> None:
+        if self._updating_roi_properties:
+            return
+        item = self._roi_properties_item
+        if item is None:
+            return
+        shape = self.roi_manager.get_shape(item)
+        if shape is None or str(shape.shape_type).lower() != "rectangle":
+            return
+        width = max(float(self.ui.doubleSpinBox_rect_width.value()), 1e-6)
+        height = max(float(self.ui.doubleSpinBox_rect_height.value()), 1e-6)
+        angle = float(self.ui.doubleSpinBox_rect_angle.value())
+        points = np.asarray(shape.get_points(), dtype=float)
+        if points.shape[0] < 4:
+            return
+        center = np.mean(points, axis=0)
+        angle_rad = math.radians(angle)
+        u = np.array([math.cos(angle_rad), math.sin(angle_rad)], dtype=float)
+        v = np.array([-u[1], u[0]], dtype=float)
+        half_w = 0.5 * width
+        half_h = 0.5 * height
+        new_points = np.array(
+            [
+                center - half_w * u - half_h * v,
+                center + half_w * u - half_h * v,
+                center + half_w * u + half_h * v,
+                center - half_w * u + half_h * v,
+            ],
+            dtype=float,
+        )
+        shape.set_points(new_points)
+        self.roi_manager.shapeEdited.emit(item)
+        self._refresh_roi_properties()
 
     def _update_image_transform(self) -> None:
         if not self._axis_defined:
@@ -1206,28 +1425,31 @@ class StimDMDWidget(QWidget):
             auto_contrast=True,
         )
 
-        polygon_points = self._prompt_calibration_rectangle()
-        if polygon_points is None:
+        diagonal_points = self._prompt_calibration_diagonal()
+        if diagonal_points is None:
             QMessageBox.information(
                 self,
                 "Calibration cancelled",
-                "No calibration rectangle was drawn. Calibration has been cancelled.",
+                "No calibration diagonal was drawn. Calibration has been cancelled.",
             )
             self._restore_after_calibration(previous_image, previous_view, selected_item)
             return
 
+        invert_defaults = self._preferences.axes_inverted()
         dialog = _CalibrationDialog(
             self,
             default_mirrors=self._preferences.mirror_counts(),
             default_pixel_size=self._preferences.pixel_size(),
+            default_invert_axes=bool(invert_defaults[0] or invert_defaults[1]),
         )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             self._restore_after_calibration(previous_image, previous_view, selected_item)
             return
 
-        mirrors_x, mirrors_y, pixel_size = dialog.values()
-        self._preferences.set_mirror_counts(mirrors_x, mirrors_y)
+        square_mirrors, pixel_size, invert_axes = dialog.values()
+        self._preferences.set_mirror_counts(square_mirrors, square_mirrors)
         self._preferences.set_pixel_size(pixel_size)
+        self._preferences.set_axes_inverted(invert_axes, invert_axes)
         camera_shape = (
             int(calibration_image.shape[1]),
             int(calibration_image.shape[0]),
@@ -1242,11 +1464,13 @@ class StimDMDWidget(QWidget):
 
         try:
             calibration = compute_calibration_from_square(
-                polygon_points,
-                (mirrors_x, mirrors_y),
+                diagonal_points,
+                square_mirrors,
                 pixel_size,
                 camera_shape=camera_shape,
                 dmd_shape=dmd_shape,
+                invert_x=invert_axes,
+                invert_y=invert_axes,
             )
         except ValueError as exc:
             QMessageBox.warning(self, "Calibration failed", str(exc))
@@ -1255,12 +1479,13 @@ class StimDMDWidget(QWidget):
 
         self.calibration = calibration
         print(
-            "Updated DMD calibration: pixels/mirror=(%.3f, %.3f), µm/mirror=(%.3f, %.3f)"
+            "Updated DMD calibration: pixels/mirror=(%.3f, %.3f), µm/mirror=(%.3f, %.3f), rotation=%.2f°"
             % (
                 calibration.camera_pixels_per_mirror[0],
                 calibration.camera_pixels_per_mirror[1],
                 calibration.micrometers_per_mirror[0],
                 calibration.micrometers_per_mirror[1],
+                np.degrees(calibration.camera_rotation_rad),
             )
         )
         self._prompt_save_calibration(calibration)
@@ -1341,19 +1566,15 @@ class StimDMDWidget(QWidget):
         print(f"Active DMD calibration: {path}")
         return True, None
 
-    def _prompt_calibration_rectangle(self) -> np.ndarray | None:
-        """Ask the user to draw a square around the calibration target.
-
-        Returns the rectangle vertices in camera coordinates or ``None`` when
-        the interaction is cancelled.
-        """
+    def _prompt_calibration_diagonal(self) -> np.ndarray | None:
+        """Capture the diagonal of the illuminated calibration square."""
 
         prompt = QMessageBox(self)
-        prompt.setWindowTitle("Select calibration square")
+        prompt.setWindowTitle("Select calibration diagonal")
         prompt.setIcon(QMessageBox.Icon.Information)
-        prompt.setText("Draw a rectangle around the calibration square.")
+        prompt.setText("Draw the diagonal of the illuminated calibration square.")
         prompt.setInformativeText(
-            "Left-click and drag to draw. Right-click or press Esc to cancel."
+            "Left-click and drag to draw the line. Right-click or press Esc to cancel."
         )
         prompt.setStandardButtons(
             QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Ok
@@ -1361,11 +1582,18 @@ class StimDMDWidget(QWidget):
         if prompt.exec() != QMessageBox.StandardButton.Ok:
             return None
 
-        capture = InteractiveRectangleCapture(self._get_view_box(), self)
-        rect = capture.exec()
-        if rect is None or rect.width() <= 0.0 or rect.height() <= 0.0:
+        capture = AxisCapture(self._get_view_box(), self)
+        segment = capture.exec()
+        if segment is None:
             return None
-        return self._rect_to_polygon_points(rect)
+        start, end = segment
+        start_xy = np.array([start.x(), start.y()], dtype=float)
+        end_xy = np.array([end.x(), end.y()], dtype=float)
+        if not np.all(np.isfinite(start_xy)) or not np.all(np.isfinite(end_xy)):
+            return None
+        if np.linalg.norm(end_xy - start_xy) < 1e-9:
+            return None
+        return np.vstack((start_xy, end_xy))
 
     def _capture_view_state(
         self,

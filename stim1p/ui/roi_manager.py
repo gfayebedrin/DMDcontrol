@@ -8,6 +8,8 @@ associated with tree items in a Qt application.
 from __future__ import annotations
 from typing import Iterable
 
+import math
+
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtWidgets import QTreeWidgetItem
@@ -74,48 +76,99 @@ class PolygonShape(_BaseShape):
 
 
 class RectangleShape(_BaseShape):
+    _MIN_EXTENT = 1e-6
+
     def __init__(self, points: np.ndarray, item: QTreeWidgetItem):
-        points = np.asarray(points, dtype=float)
-        min_x = float(np.min(points[:, 0]))
-        max_x = float(np.max(points[:, 0]))
-        min_y = float(np.min(points[:, 1]))
-        max_y = float(np.max(points[:, 1]))
-        width = max(max_x - min_x, 1e-6)
-        height = max(max_y - min_y, 1e-6)
         roi = pg.RectROI(
-            pos=(min_x, min_y),
-            size=(width, height),
-            rotatable=False,
+            pos=(0.0, 0.0),
+            size=(1.0, 1.0),
+            rotatable=True,
             removable=False,
         )
         super().__init__(item, roi, "rectangle")
-        self.roi.setAngle(0.0)
+        self.set_points(points)
 
     def change_ref(self, center: QPointF, angle: float) -> None:
-        self.roi.setPos(center.x(), center.y())
-        self.roi.setAngle(0.0)
+        # Maintain current rotation but translate so the rectangle follows the
+        # new reference point.
+        state = dict(self.roi.state)
+        width = float(state.get("size", (0.0, 0.0))[0])
+        height = float(state.get("size", (0.0, 0.0))[1])
+        angle_deg = float(state.get("angle", 0.0))
+        center_vec = np.array([float(center.x()), float(center.y())], dtype=float)
+        half_size = np.array([width / 2.0, height / 2.0], dtype=float)
+        angle_rad = math.radians(angle_deg)
+        rot = np.array(
+            [[math.cos(angle_rad), -math.sin(angle_rad)],
+             [math.sin(angle_rad), math.cos(angle_rad)]],
+            dtype=float,
+        )
+        pos = center_vec - rot @ half_size
+        self.roi.setAngle(angle_deg)
+        self.roi.setPos(float(pos[0]), float(pos[1]))
 
     def get_points(self) -> np.ndarray:
-        rect = self.roi.parentBounds()
-        if rect is None:
-            return np.zeros((0, 2), dtype=float)
-        x0 = float(rect.left())
-        y0 = float(rect.top())
-        x1 = float(rect.right())
-        y1 = float(rect.bottom())
-        return np.asarray([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], dtype=float)
+        state = dict(self.roi.state)
+        pos = np.asarray(state.get("pos", (0.0, 0.0)), dtype=float)
+        width, height = state.get("size", (0.0, 0.0))
+        width = float(width)
+        height = float(height)
+        angle_deg = float(state.get("angle", 0.0))
+        angle_rad = math.radians(angle_deg)
+        cos_a = math.cos(angle_rad)
+        sin_a = math.sin(angle_rad)
+        u = np.array([cos_a, sin_a], dtype=float)
+        v = np.array([-sin_a, cos_a], dtype=float)
+        p0 = pos
+        p1 = pos + width * u
+        p2 = p1 + height * v
+        p3 = pos + height * v
+        return np.asarray([p0, p1, p2, p3], dtype=float)
 
     def set_points(self, points: np.ndarray) -> None:
-        points = np.asarray(points, dtype=float)
-        min_x = float(np.min(points[:, 0]))
-        max_x = float(np.max(points[:, 0]))
-        min_y = float(np.min(points[:, 1]))
-        max_y = float(np.max(points[:, 1]))
-        width = max(max_x - min_x, 1e-6)
-        height = max(max_y - min_y, 1e-6)
+        pts = np.asarray(points, dtype=float)
+        if pts.shape[0] < 4:
+            raise ValueError("Rectangle points must contain at least four vertices.")
+        sums = np.sum(pts[:, :2], axis=1)
+        start_idx = int(np.argmin(sums))
+        origin = pts[start_idx]
+        remaining = np.delete(pts, start_idx, axis=0)
+        if remaining.shape[0] < 3:
+            raise ValueError("Rectangle definition requires four distinct vertices.")
+        vectors = remaining - origin
+        distances = np.linalg.norm(vectors, axis=1)
+        order = np.argsort(distances)
+        adj_a = remaining[order[0]]
+        adj_b = remaining[order[1]]
+        diag = remaining[order[2]]
+        vec_a = adj_a - origin
+        vec_b = adj_b - origin
+        cross = vec_a[0] * vec_b[1] - vec_a[1] * vec_b[0]
+        if cross < 0:
+            adj_a, adj_b = adj_b, adj_a
+            vec_a, vec_b = vec_b, vec_a
+        ordered = np.vstack((origin, adj_a, diag, adj_b))
+        width_vec = ordered[1] - ordered[0]
+        height_vec = ordered[3] - ordered[0]
+        width = float(np.linalg.norm(width_vec))
+        if width < self._MIN_EXTENT:
+            width = self._MIN_EXTENT
+            width_vec = np.array([width, 0.0], dtype=float)
+        u = width_vec / width
+        v = np.array([-u[1], u[0]], dtype=float)
+        height = float(np.dot(height_vec, v))
+        if abs(height) < self._MIN_EXTENT:
+            height = self._MIN_EXTENT
+        if height < 0:
+            height = -height
+            v = -v
+        angle_deg = math.degrees(math.atan2(u[1], u[0]))
+        center = ordered[0] + 0.5 * width * u + 0.5 * height * v
+        pos = center - 0.5 * width * u - 0.5 * height * v
         self.roi.setAngle(0.0)
-        self.roi.setPos(min_x, min_y)
         self.roi.setSize((width, height))
+        self.roi.setPos(float(pos[0]), float(pos[1]))
+        self.roi.setAngle(angle_deg)
 
 
 class RoiManager(QObject):
@@ -238,3 +291,4 @@ class RoiManager(QObject):
             new_shape = self.register_polygon(item, points)
         if was_visible:
             self._add_visible(new_shape.roi)
+        self.shapeEdited.emit(item)

@@ -23,6 +23,8 @@ class CalibrationPreferences:
     _KEY_PIXEL_SIZE = "calibration/pixel_size"
     _KEY_AXIS_BEHAVIOUR = "axis/redefinition_mode"
     _AXIS_BEHAVIOUR_DEFAULT = "move"
+    _KEY_INVERT_X = "calibration/invert_x"
+    _KEY_INVERT_Y = "calibration/invert_y"
 
     def __init__(self) -> None:
         self._settings = QSettings(self._ORG, self._APP)
@@ -48,6 +50,20 @@ class CalibrationPreferences:
             return float(value)
         except (TypeError, ValueError):
             return default
+
+    @staticmethod
+    def _to_bool(value, default: bool) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        if isinstance(value, str):
+            lowered = value.strip().lower()
+            if lowered in {"1", "true", "t", "yes", "y"}:
+                return True
+            if lowered in {"0", "false", "f", "no", "n"}:
+                return False
+        return default
 
     def last_calibration_file_path(self) -> str:
         return self._to_str(self._settings.value(self._KEY_LAST_FILE, ""))
@@ -78,6 +94,16 @@ class CalibrationPreferences:
 
     def set_pixel_size(self, pixel_size: float) -> None:
         self._settings.setValue(self._KEY_PIXEL_SIZE, float(pixel_size))
+        self._settings.sync()
+
+    def axes_inverted(self) -> tuple[bool, bool]:
+        inv_x = self._to_bool(self._settings.value(self._KEY_INVERT_X), False)
+        inv_y = self._to_bool(self._settings.value(self._KEY_INVERT_Y), False)
+        return inv_x, inv_y
+
+    def set_axes_inverted(self, invert_x: bool, invert_y: bool) -> None:
+        self._settings.setValue(self._KEY_INVERT_X, bool(invert_x))
+        self._settings.setValue(self._KEY_INVERT_Y, bool(invert_y))
         self._settings.sync()
 
     def axis_redefinition_mode(self) -> str:

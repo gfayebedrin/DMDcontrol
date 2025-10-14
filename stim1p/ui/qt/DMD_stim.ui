@@ -180,7 +180,7 @@
                </widget>
               </item>
               <item>
-               <widget class="QTreeWidget" name="treeWidget">
+              <widget class="QTreeWidget" name="treeWidget">
                 <property name="dragDropMode">
                  <enum>QAbstractItemView::DragDropMode::InternalMove</enum>
                 </property>
@@ -192,6 +192,104 @@
                   <string notr="true">1</string>
                  </property>
                 </column>
+               </widget>
+              </item>
+              <item>
+               <widget class="QGroupBox" name="groupBox_roi_properties">
+                <property name="title">
+                 <string>ROI properties</string>
+                </property>
+                <layout class="QVBoxLayout" name="verticalLayout_roi_properties">
+                 <item>
+                  <widget class="QStackedWidget" name="stackedWidget_roi_properties">
+                   <property name="currentIndex">
+                    <number>0</number>
+                   </property>
+                   <widget class="QWidget" name="page_roi_placeholder">
+                    <layout class="QVBoxLayout" name="verticalLayout_roi_placeholder">
+                     <item>
+                      <widget class="QLabel" name="label_roi_placeholder">
+                       <property name="text">
+                        <string>Select an ROI to edit its properties.</string>
+                       </property>
+                       <property name="wordWrap">
+                        <bool>true</bool>
+                       </property>
+                      </widget>
+                     </item>
+                     <item>
+                      <spacer name="verticalSpacer_roi_placeholder">
+                       <property name="orientation">
+                        <enum>Qt::Orientation::Vertical</enum>
+                       </property>
+                       <property name="sizeHint" stdset="0">
+                        <size>
+                         <width>20</width>
+                         <height>40</height>
+                        </size>
+                       </property>
+                      </spacer>
+                     </item>
+                    </layout>
+                   </widget>
+                   <widget class="QWidget" name="page_roi_polygon">
+                    <layout class="QVBoxLayout" name="verticalLayout_roi_polygon">
+                     <item>
+                      <widget class="QTableWidget" name="tableWidget_polygon_points">
+                       <property name="columnCount">
+                        <number>2</number>
+                       </property>
+                       <column>
+                        <property name="text">
+                         <string>X</string>
+                        </property>
+                       </column>
+                       <column>
+                        <property name="text">
+                         <string>Y</string>
+                        </property>
+                       </column>
+                      </widget>
+                     </item>
+                    </layout>
+                   </widget>
+                   <widget class="QWidget" name="page_roi_rectangle">
+                    <layout class="QFormLayout" name="formLayout_roi_rectangle">
+                     <item row="0" column="0">
+                      <widget class="QLabel" name="label_rect_width">
+                       <property name="text">
+                        <string>Width</string>
+                       </property>
+                      </widget>
+                     </item>
+                     <item row="0" column="1">
+                      <widget class="QDoubleSpinBox" name="doubleSpinBox_rect_width"/>
+                     </item>
+                     <item row="1" column="0">
+                      <widget class="QLabel" name="label_rect_height">
+                       <property name="text">
+                        <string>Height</string>
+                       </property>
+                      </widget>
+                     </item>
+                     <item row="1" column="1">
+                      <widget class="QDoubleSpinBox" name="doubleSpinBox_rect_height"/>
+                     </item>
+                     <item row="2" column="0">
+                      <widget class="QLabel" name="label_rect_angle">
+                       <property name="text">
+                        <string>Angle</string>
+                       </property>
+                      </widget>
+                     </item>
+                     <item row="2" column="1">
+                      <widget class="QDoubleSpinBox" name="doubleSpinBox_rect_angle"/>
+                     </item>
+                    </layout>
+                   </widget>
+                  </widget>
+                 </item>
+                </layout>
                </widget>
               </item>
               <item>

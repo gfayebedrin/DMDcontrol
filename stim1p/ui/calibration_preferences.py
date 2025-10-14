@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from PySide6.QtCore import QSettings
 
+from .grid_dialog import GridParameters
+
 
 class CalibrationPreferences:
     """Store calibration paths and defaults in the platform settings backend."""
@@ -25,6 +27,15 @@ class CalibrationPreferences:
     _AXIS_BEHAVIOUR_DEFAULT = "move"
     _KEY_INVERT_X = "calibration/invert_x"
     _KEY_INVERT_Y = "calibration/invert_y"
+    _KEY_GRID_ROWS = "grid/rows"
+    _KEY_GRID_COLUMNS = "grid/columns"
+    _KEY_GRID_WIDTH = "grid/rect_width"
+    _KEY_GRID_HEIGHT = "grid/rect_height"
+    _KEY_GRID_SPACING_X = "grid/spacing_x"
+    _KEY_GRID_SPACING_Y = "grid/spacing_y"
+    _KEY_GRID_ANGLE = "grid/angle"
+    _KEY_GRID_ORIGIN_X = "grid/origin_x"
+    _KEY_GRID_ORIGIN_Y = "grid/origin_y"
 
     def __init__(self) -> None:
         self._settings = QSettings(self._ORG, self._APP)
@@ -116,4 +127,29 @@ class CalibrationPreferences:
         if mode not in ("move", "keep"):
             mode = self._AXIS_BEHAVIOUR_DEFAULT
         self._settings.setValue(self._KEY_AXIS_BEHAVIOUR, mode)
+        self._settings.sync()
+
+    def grid_parameters(self) -> GridParameters:
+        return GridParameters(
+            rows=self._to_int(self._settings.value(self._KEY_GRID_ROWS), 2),
+            columns=self._to_int(self._settings.value(self._KEY_GRID_COLUMNS), 2),
+            rect_width=self._to_float(self._settings.value(self._KEY_GRID_WIDTH), 50.0),
+            rect_height=self._to_float(self._settings.value(self._KEY_GRID_HEIGHT), 50.0),
+            spacing_x=self._to_float(self._settings.value(self._KEY_GRID_SPACING_X), 10.0),
+            spacing_y=self._to_float(self._settings.value(self._KEY_GRID_SPACING_Y), 10.0),
+            angle_deg=self._to_float(self._settings.value(self._KEY_GRID_ANGLE), 0.0),
+            origin_x=self._to_float(self._settings.value(self._KEY_GRID_ORIGIN_X), 0.0),
+            origin_y=self._to_float(self._settings.value(self._KEY_GRID_ORIGIN_Y), 0.0),
+        )
+
+    def set_grid_parameters(self, params: GridParameters) -> None:
+        self._settings.setValue(self._KEY_GRID_ROWS, int(params.rows))
+        self._settings.setValue(self._KEY_GRID_COLUMNS, int(params.columns))
+        self._settings.setValue(self._KEY_GRID_WIDTH, float(params.rect_width))
+        self._settings.setValue(self._KEY_GRID_HEIGHT, float(params.rect_height))
+        self._settings.setValue(self._KEY_GRID_SPACING_X, float(params.spacing_x))
+        self._settings.setValue(self._KEY_GRID_SPACING_Y, float(params.spacing_y))
+        self._settings.setValue(self._KEY_GRID_ANGLE, float(params.angle_deg))
+        self._settings.setValue(self._KEY_GRID_ORIGIN_X, float(params.origin_x))
+        self._settings.setValue(self._KEY_GRID_ORIGIN_Y, float(params.origin_y))
         self._settings.sync()

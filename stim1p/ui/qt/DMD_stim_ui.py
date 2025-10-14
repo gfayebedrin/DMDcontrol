@@ -242,7 +242,13 @@ class Ui_widget_dmd_stim(object):
         icon2 = QIcon(QIcon.fromTheme(QIcon.ThemeIcon.ListAdd))
         self.pushButton_add_pattern.setIcon(icon2)
 
-        self.gridLayout_patternsButtons.addWidget(self.pushButton_add_pattern, 0, 0, 1, 2)
+        self.gridLayout_patternsButtons.addWidget(self.pushButton_add_pattern, 0, 0, 1, 1)
+
+        self.pushButton_create_grid = QPushButton(self.tab_editor)
+        self.pushButton_create_grid.setObjectName(u"pushButton_create_grid")
+        self.pushButton_create_grid.setIcon(icon2)
+
+        self.gridLayout_patternsButtons.addWidget(self.pushButton_create_grid, 0, 1, 1, 1)
 
         self.pushButton_remove_pattern = QPushButton(self.tab_editor)
         self.pushButton_remove_pattern.setObjectName(u"pushButton_remove_pattern")
@@ -476,6 +482,7 @@ class Ui_widget_dmd_stim(object):
         self.pushButton_draw_rectangle.setText(QCoreApplication.translate("widget_dmd_stim", u"Draw rectangle", None))
         self.pushButton_draw_polygon.setText(QCoreApplication.translate("widget_dmd_stim", u"Draw polygon", None))
         self.pushButton_add_pattern.setText(QCoreApplication.translate("widget_dmd_stim", u"Add pattern", None))
+        self.pushButton_create_grid.setText(QCoreApplication.translate("widget_dmd_stim", u"Create grid...", None))
         self.pushButton_remove_pattern.setText(QCoreApplication.translate("widget_dmd_stim", u"Delete", None))
         self.label_sequence.setText(QCoreApplication.translate("widget_dmd_stim", u"Sequence", None))
         ___qtablewidgetitem2 = self.tableWidget.horizontalHeaderItem(0)

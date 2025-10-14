@@ -6,6 +6,7 @@ import numpy as np
 from PIL import Image
 from datetime import timedelta
 from dataclasses import dataclass
+from typing import Sequence
 
 from PySide6.QtCore import (
     QEvent,
@@ -51,6 +52,7 @@ from ..logic import saving
 from .qt.DMD_stim_ui import Ui_widget_dmd_stim
 from . import console, roi_manager, tree_table_manager
 from .calibration_preferences import CalibrationPreferences
+from .grid_dialog import GridDialog, GridParameters
 from .capture_tools import (
     AxisCapture,
     InteractiveRectangleCapture,
@@ -144,6 +146,44 @@ class _CalibrationDialog(QDialog):
         return self._mirror_size.value(), self._pixel_size.value(), self._invert_axes.isChecked()
 
 
+class _GridPreviewOverlay:
+    """Render a temporary preview of rectangles on top of the plot."""
+
+    def __init__(self, plot_item: pg.PlotItem):
+        self._plot_item = plot_item
+        self._items: list[pg.PlotCurveItem] = []
+        self._pen = pg.mkPen(color=(0, 200, 255, 200), width=2, style=Qt.PenStyle.DashLine)
+
+    def set_rectangles(self, rectangles: Sequence[np.ndarray]) -> None:
+        rectangles = [np.asarray(rect, dtype=float) for rect in rectangles]
+        required = len(rectangles)
+        while len(self._items) < required:
+            item = pg.PlotCurveItem(pen=self._pen)
+            item.setZValue(8_750)
+            item.hide()
+            self._plot_item.addItem(item)
+            self._items.append(item)
+        for idx, rect in enumerate(rectangles):
+            item = self._items[idx]
+            if rect.ndim != 2 or rect.shape[1] != 2:
+                item.hide()
+                continue
+            closed = np.vstack([rect, rect[0]])
+            item.setData(closed[:, 0], closed[:, 1])
+            item.show()
+        for idx in range(len(rectangles), len(self._items)):
+            self._items[idx].hide()
+
+    def hide(self) -> None:
+        for item in self._items:
+            item.hide()
+
+    def clear(self) -> None:
+        for item in self._items:
+            self._plot_item.removeItem(item)
+        self._items.clear()
+
+
 class StimDMDWidget(QWidget):
     """Coordinate DMD calibration, ROI editing, and pattern sequencing UI."""
 
@@ -222,6 +262,8 @@ class StimDMDWidget(QWidget):
         self._axis_line_item.hide()
         self._axis_arrow_item.hide()
         self._axis_origin_item.hide()
+        self._grid_preview_overlay: _GridPreviewOverlay | None = None
+        self._grid_dialog: GridDialog | None = None
 
         # HistogramLUTWidget provides the contrast controls that users expect.
         self._hist_widget = pg.HistogramLUTWidget(parent=self)
@@ -241,6 +283,9 @@ class StimDMDWidget(QWidget):
         self.tree_manager = tree_table_manager.TreeManager(self)
         self.table_manager = tree_table_manager.TableManager(self)
         self._preferences = CalibrationPreferences()
+        self._grid_last_parameters = self._preferences.grid_parameters()
+        if not self._grid_last_parameters.is_valid():
+            self._grid_last_parameters = GridParameters()
         self._roi_properties_item: QTreeWidgetItem | None = None
         self._updating_roi_properties = False
         self._setup_roi_properties_panel()
@@ -388,6 +433,7 @@ class StimDMDWidget(QWidget):
         self.ui.pushButton_add_pattern.clicked.connect(
             self.tree_manager.add_pattern
         )
+        self.ui.pushButton_create_grid.clicked.connect(self._open_grid_dialog)
         self.ui.pushButton_draw_rectangle.clicked.connect(self._draw_rectangle_roi)
         self.ui.pushButton_draw_polygon.clicked.connect(self._draw_polygon_roi)
         self.ui.pushButton_add_row.clicked.connect(self._add_row_table)
@@ -1131,6 +1177,66 @@ class StimDMDWidget(QWidget):
             return
         array = np.array([[pt.x(), pt.y()] for pt in points], dtype=float)
         self._create_roi_item(parent_item, array, "polygon")
+
+    def _ensure_grid_preview_overlay(self) -> _GridPreviewOverlay:
+        if self._grid_preview_overlay is None:
+            self._grid_preview_overlay = _GridPreviewOverlay(self._plot_item)
+        return self._grid_preview_overlay
+
+    def _open_grid_dialog(self) -> None:
+        if self._grid_dialog is not None:
+            self._grid_dialog.raise_()
+            self._grid_dialog.activateWindow()
+            return
+        dialog = GridDialog(self, defaults=self._grid_last_parameters)
+        dialog.setModal(True)
+        dialog.parametersChanged.connect(self._on_grid_parameters_changed)
+        dialog.accepted.connect(self._on_grid_dialog_accepted)
+        dialog.finished.connect(self._on_grid_dialog_finished)
+        self._grid_dialog = dialog
+        # Ensure the preview reflects the current parameters as soon as the dialog opens.
+        self._on_grid_parameters_changed(dialog.parameters())
+        dialog.open()
+
+    def _on_grid_parameters_changed(self, params: GridParameters) -> None:
+        self._grid_last_parameters = params
+        if params.is_valid():
+            self._preferences.set_grid_parameters(params)
+        overlay = self._ensure_grid_preview_overlay()
+        rectangles = params.rectangle_points()
+        if rectangles:
+            overlay.set_rectangles(rectangles)
+        else:
+            overlay.hide()
+
+    def _on_grid_dialog_accepted(self) -> None:
+        dialog = self._grid_dialog
+        if dialog is None:
+            return
+        params = dialog.parameters()
+        rectangles = params.rectangle_points()
+        if not rectangles:
+            return
+        description_base = f"Grid {params.rows}x{params.columns}"
+        total = len(rectangles)
+        for idx, rect in enumerate(rectangles, start=1):
+            self.tree_manager.add_pattern()
+            pattern_index = self.ui.treeWidget.topLevelItemCount() - 1
+            pattern_item = self.ui.treeWidget.topLevelItem(pattern_index)
+            if pattern_item is None:
+                continue
+            suffix = "" if total == 1 else f" ({idx}/{total})"
+            self.tree_manager.set_pattern_label(
+                pattern_item, pattern_index, f"{description_base}{suffix}"
+            )
+            self._create_roi_item(pattern_item, rect, "rectangle")
+        if rectangles:
+            self.tree_manager.renumber_pattern_labels()
+
+    def _on_grid_dialog_finished(self, _result: int) -> None:
+        self._grid_dialog = None
+        if self._grid_preview_overlay is not None:
+            self._grid_preview_overlay.hide()
 
     def _reset_image_view(self) -> None:
         if self._current_image is None:

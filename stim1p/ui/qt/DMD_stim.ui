@@ -311,10 +311,20 @@
                   </property>
                  </widget>
                 </item>
-                <item row="0" column="0" colspan="2">
+                <item row="0" column="0">
                  <widget class="QPushButton" name="pushButton_add_pattern">
                   <property name="text">
                    <string>Add pattern</string>
+                  </property>
+                  <property name="icon">
+                   <iconset theme="QIcon::ThemeIcon::ListAdd"/>
+                  </property>
+                 </widget>
+                </item>
+                <item row="0" column="1">
+                 <widget class="QPushButton" name="pushButton_create_grid">
+                  <property name="text">
+                   <string>Create grid...</string>
                   </property>
                   <property name="icon">
                    <iconset theme="QIcon::ThemeIcon::ListAdd"/>

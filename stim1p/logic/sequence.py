@@ -5,7 +5,8 @@ Utilities for handling pattern sequences and timing information.
 import numpy as np
 from dataclasses import dataclass
 import sched, threading
-from datetime import timedelta, datetime
+import time
+from datetime import timedelta
 
 # from ..hardware import DMD # TODO put that again in the future
 from ..logic.calibration import DMDCalibration
@@ -89,8 +90,6 @@ def play_pattern_sequence(
             pattern vertices in the object frame. If ``None`` the polygons are
             assumed to already be expressed in the calibration frame.
     """
-    t0 = datetime.now() + delay
-
     timings = pattern_sequence.timings
 
     assert (
@@ -111,11 +110,13 @@ def play_pattern_sequence(
     ])
 
     # Schedule the frames to be shown
-    scheduler = sched.scheduler()
+    scheduler = sched.scheduler(time.time, time.sleep)
+
+    start_time = time.time() + delay.total_seconds()
 
     for frame_index, timing in zip(pattern_sequence.sequence, pattern_sequence.timings):
         scheduler.enterabs(
-            (t0 + timing).timestamp(),
+            start_time + timing.total_seconds(),
             1,
             dmd.show_frame,
             argument=(frame_index,),

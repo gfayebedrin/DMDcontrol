@@ -1,22 +1,47 @@
-from .hardware import DMD
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+try:
+    from .hardware import DMD as _DMD_CLASS
+except ImportError as exc:  # pragma: no cover - exercised when drivers are absent
+    _DMD_CLASS = None
+    _DMD_IMPORT_ERROR = exc
+else:
+    _DMD_IMPORT_ERROR = None
+
+if TYPE_CHECKING:  # pragma: no cover - import only for static typing
+    from .hardware import DMD
 
 from .logic.calibration import DMDCalibration
 from .logic.geometry import AxisDefinition, PatternCoordinates, polygons_to_mask
 from .logic.saving import (
-    save_pattern_sequence,
+    load_calibration,
     load_pattern_sequence,
     save_calibration,
-    load_calibration,
+    save_pattern_sequence,
 )
 from .logic.sequence import PatternSequence, play_pattern_sequence
-from .logic.synchronisation import CancellableTask, NamedPipeServer
+from .logic.synchronisation import (
+    CancellableTask,
+    NAMED_PIPE_SUPPORTED,
+    NAMED_PIPE_UNAVAILABLE_REASON,
+    NamedPipeServer,
+)
 
 
 class Stim1P:
     """Main class for managing DMD operations.
-    This class provides methods to connect to the DMD, 
-    load and save calibration and pattern sequences.
-    It includes a named pipe server to listen for commands to start and stop DMD operations.
+
+    The class can be instantiated on machines that do not have the DMD hardware
+    stack installed, which allows preparing calibration and pattern sequence
+    files offline. Hardware-specific calls such as :meth:`connect_dmd` and
+    :meth:`start_listening` raise :class:`RuntimeError` when the underlying
+    drivers or Windows-only dependencies are unavailable.
+
+    Example:
+        >>> stim = Stim1P()  # doctest: +SKIP
+        >>> stim.load_pattern_sequence("patterns.h5")  # doctest: +SKIP
     """
 
     def __init__(self):
@@ -30,7 +55,7 @@ class Stim1P:
         """Context manager entry point to connect to the DMD."""
         self.connect_dmd()
         return self
-    
+
     def __exit__(self, exc_type, exc_value, traceback):
         """Context manager exit point to disconnect from the DMD."""
         self.stop_listening()
@@ -40,7 +65,14 @@ class Stim1P:
         """Connect to the DMD hardware."""
         if self._dmd is not None:
             raise RuntimeError("DMD is already connected.")
-        self._dmd = DMD()
+        if _DMD_CLASS is None:
+            reason = (
+                "DMD hardware support is not available on this machine."
+                if _DMD_IMPORT_ERROR is None
+                else f"DMD hardware support could not be loaded: {_DMD_IMPORT_ERROR}"
+            )
+            raise RuntimeError(reason)
+        self._dmd = _DMD_CLASS()
 
     def disconnect_dmd(self):
         """Disconnect from the DMD hardware."""
@@ -51,12 +83,22 @@ class Stim1P:
 
     def start_listening(self, pipe_name: str = r"\\.\pipe\MatPy"):
         """Start the named pipe server to listen for commands.
+
         Accepted commands are `{"dmd":"start"}` and `{"dmd":"stop"}`.
+
         Parameters:
             pipe_name (str): The name of the named pipe to listen on.
+
         Raises:
-            RuntimeError: If the server is already running or if calibration or pattern sequence is not set.
+            RuntimeError: If the server is already running or if calibration or
+                pattern sequence is not set.
         """
+        if not NAMED_PIPE_SUPPORTED:
+            reason = (
+                NAMED_PIPE_UNAVAILABLE_REASON
+                or "Named pipe synchronisation is unavailable on this platform."
+            )
+            raise RuntimeError(reason)
         if self._calibration is None:
             raise RuntimeError("Calibration must be set before starting the server.")
         if self._pattern_sequence is None:
@@ -89,20 +131,11 @@ class Stim1P:
         self._pipe_server = None
 
     def load_calibration(self, filepath: str):
-        """
-        Load a calibration object from an HDF5 file.
-        Parameters:
-            filepath (str): Path to the HDF5 file.
-        """
+        """Load a calibration object from an HDF5 file."""
         self._calibration = load_calibration(filepath)
 
     def save_calibration(self, filepath: str):
-        """Save the current calibration object to an HDF5 file.
-        Parameters:
-            filepath (str): Path to the HDF5 file.
-        Raises:
-            RuntimeError: If no calibration is set.
-        """
+        """Save the current calibration object to an HDF5 file."""
         if self._calibration is None:
             raise RuntimeError("No calibration to save.")
         save_calibration(filepath, self._calibration)
@@ -112,19 +145,11 @@ class Stim1P:
         self._calibration = None
 
     def load_pattern_sequence(self, filepath: str):
-        """Load a pattern sequence from an HDF5 file.
-        Parameters:
-            filepath (str): Path to the HDF5 file.
-        """
+        """Load a pattern sequence from an HDF5 file."""
         self._pattern_sequence = load_pattern_sequence(filepath)
 
     def save_pattern_sequence(self, filepath: str):
-        """Save the current pattern sequence to an HDF5 file.
-        Parameters:
-            filepath (str): Path to the HDF5 file.
-        Raises:
-            RuntimeError: If no pattern sequence is set.
-        """
+        """Save the current pattern sequence to an HDF5 file."""
         if self._pattern_sequence is None:
             raise RuntimeError("No pattern sequence to save.")
         save_pattern_sequence(filepath, self._pattern_sequence)

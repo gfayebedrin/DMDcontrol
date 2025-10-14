@@ -15,12 +15,12 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QFont, QFontDatabase, QGradient, QIcon,
     QImage, QKeySequence, QLinearGradient, QPainter,
     QPalette, QPixmap, QRadialGradient, QTransform)
-from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QFrame,
-    QGridLayout, QGroupBox, QHBoxLayout, QHeaderView,
-    QLabel, QLineEdit, QPlainTextEdit, QPushButton,
-    QSizePolicy, QSplitter, QStackedWidget, QTabWidget,
-    QTableWidget, QTableWidgetItem, QTreeWidget, QTreeWidgetItem,
-    QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDoubleSpinBox,
+    QFormLayout, QFrame, QGridLayout, QGroupBox, QHBoxLayout,
+    QHeaderView, QLabel, QLineEdit, QPlainTextEdit,
+    QPushButton, QSizePolicy, QSpacerItem, QSplitter,
+    QStackedWidget, QTabWidget, QTableWidget, QTableWidgetItem,
+    QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 class Ui_widget_dmd_stim(object):
     def setupUi(self, widget_dmd_stim):
@@ -143,6 +143,84 @@ class Ui_widget_dmd_stim(object):
         self.treeWidget.setAlternatingRowColors(True)
 
         self.verticalLayout_patterns.addWidget(self.treeWidget)
+
+        self.groupBox_roi_properties = QGroupBox(self.tab_editor)
+        self.groupBox_roi_properties.setObjectName(u"groupBox_roi_properties")
+        self.groupBox_roi_properties.setCheckable(False)
+        self.verticalLayout_roi_properties = QVBoxLayout(self.groupBox_roi_properties)
+        self.verticalLayout_roi_properties.setObjectName(u"verticalLayout_roi_properties")
+        self.stackedWidget_roi_properties = QStackedWidget(self.groupBox_roi_properties)
+        self.stackedWidget_roi_properties.setObjectName(u"stackedWidget_roi_properties")
+        self.page_roi_placeholder = QWidget()
+        self.page_roi_placeholder.setObjectName(u"page_roi_placeholder")
+        self.verticalLayout_roi_placeholder = QVBoxLayout(self.page_roi_placeholder)
+        self.verticalLayout_roi_placeholder.setObjectName(u"verticalLayout_roi_placeholder")
+        self.label_roi_placeholder = QLabel(self.page_roi_placeholder)
+        self.label_roi_placeholder.setObjectName(u"label_roi_placeholder")
+        self.label_roi_placeholder.setWordWrap(True)
+
+        self.verticalLayout_roi_placeholder.addWidget(self.label_roi_placeholder)
+
+        self.verticalSpacer_roi_placeholder = QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
+
+        self.verticalLayout_roi_placeholder.addItem(self.verticalSpacer_roi_placeholder)
+
+        self.stackedWidget_roi_properties.addWidget(self.page_roi_placeholder)
+        self.page_roi_polygon = QWidget()
+        self.page_roi_polygon.setObjectName(u"page_roi_polygon")
+        self.verticalLayout_roi_polygon = QVBoxLayout(self.page_roi_polygon)
+        self.verticalLayout_roi_polygon.setObjectName(u"verticalLayout_roi_polygon")
+        self.tableWidget_polygon_points = QTableWidget(self.page_roi_polygon)
+        self.tableWidget_polygon_points.setObjectName(u"tableWidget_polygon_points")
+        self.tableWidget_polygon_points.setColumnCount(2)
+        self.tableWidget_polygon_points.setRowCount(0)
+        __qtablewidgetitem = QTableWidgetItem()
+        self.tableWidget_polygon_points.setHorizontalHeaderItem(0, __qtablewidgetitem)
+        __qtablewidgetitem1 = QTableWidgetItem()
+        self.tableWidget_polygon_points.setHorizontalHeaderItem(1, __qtablewidgetitem1)
+
+        self.verticalLayout_roi_polygon.addWidget(self.tableWidget_polygon_points)
+
+        self.stackedWidget_roi_properties.addWidget(self.page_roi_polygon)
+        self.page_roi_rectangle = QWidget()
+        self.page_roi_rectangle.setObjectName(u"page_roi_rectangle")
+        self.formLayout_roi_rectangle = QFormLayout(self.page_roi_rectangle)
+        self.formLayout_roi_rectangle.setObjectName(u"formLayout_roi_rectangle")
+        self.label_rect_width = QLabel(self.page_roi_rectangle)
+        self.label_rect_width.setObjectName(u"label_rect_width")
+
+        self.formLayout_roi_rectangle.setWidget(0, QFormLayout.ItemRole.LabelRole, self.label_rect_width)
+
+        self.doubleSpinBox_rect_width = QDoubleSpinBox(self.page_roi_rectangle)
+        self.doubleSpinBox_rect_width.setObjectName(u"doubleSpinBox_rect_width")
+
+        self.formLayout_roi_rectangle.setWidget(0, QFormLayout.ItemRole.FieldRole, self.doubleSpinBox_rect_width)
+
+        self.label_rect_height = QLabel(self.page_roi_rectangle)
+        self.label_rect_height.setObjectName(u"label_rect_height")
+
+        self.formLayout_roi_rectangle.setWidget(1, QFormLayout.ItemRole.LabelRole, self.label_rect_height)
+
+        self.doubleSpinBox_rect_height = QDoubleSpinBox(self.page_roi_rectangle)
+        self.doubleSpinBox_rect_height.setObjectName(u"doubleSpinBox_rect_height")
+
+        self.formLayout_roi_rectangle.setWidget(1, QFormLayout.ItemRole.FieldRole, self.doubleSpinBox_rect_height)
+
+        self.label_rect_angle = QLabel(self.page_roi_rectangle)
+        self.label_rect_angle.setObjectName(u"label_rect_angle")
+
+        self.formLayout_roi_rectangle.setWidget(2, QFormLayout.ItemRole.LabelRole, self.label_rect_angle)
+
+        self.doubleSpinBox_rect_angle = QDoubleSpinBox(self.page_roi_rectangle)
+        self.doubleSpinBox_rect_angle.setObjectName(u"doubleSpinBox_rect_angle")
+
+        self.formLayout_roi_rectangle.setWidget(2, QFormLayout.ItemRole.FieldRole, self.doubleSpinBox_rect_angle)
+
+        self.stackedWidget_roi_properties.addWidget(self.page_roi_rectangle)
+
+        self.verticalLayout_roi_properties.addWidget(self.stackedWidget_roi_properties)
+
+        self.verticalLayout_patterns.addWidget(self.groupBox_roi_properties)
 
         self.gridLayout_patternsButtons = QGridLayout()
         self.gridLayout_patternsButtons.setObjectName(u"gridLayout_patternsButtons")
@@ -357,6 +435,7 @@ class Ui_widget_dmd_stim(object):
         self.retranslateUi(widget_dmd_stim)
 
         self.tabWidget.setCurrentIndex(0)
+        self.stackedWidget_roi_properties.setCurrentIndex(0)
         self.pushButton_change_folder.setDefault(False)
 
 
@@ -383,6 +462,15 @@ class Ui_widget_dmd_stim(object):
         self.pushButton_save_patterns.setShortcut(QCoreApplication.translate("widget_dmd_stim", u"Ctrl+S", None))
 #endif // QT_CONFIG(shortcut)
         self.label_patterns.setText(QCoreApplication.translate("widget_dmd_stim", u"Patterns", None))
+        self.groupBox_roi_properties.setTitle(QCoreApplication.translate("widget_dmd_stim", u"ROI properties", None))
+        self.label_roi_placeholder.setText(QCoreApplication.translate("widget_dmd_stim", u"Select an ROI to edit its properties.", None))
+        ___qtablewidgetitem = self.tableWidget_polygon_points.horizontalHeaderItem(0)
+        ___qtablewidgetitem.setText(QCoreApplication.translate("widget_dmd_stim", u"X", None));
+        ___qtablewidgetitem1 = self.tableWidget_polygon_points.horizontalHeaderItem(1)
+        ___qtablewidgetitem1.setText(QCoreApplication.translate("widget_dmd_stim", u"Y", None));
+        self.label_rect_width.setText(QCoreApplication.translate("widget_dmd_stim", u"Width", None))
+        self.label_rect_height.setText(QCoreApplication.translate("widget_dmd_stim", u"Height", None))
+        self.label_rect_angle.setText(QCoreApplication.translate("widget_dmd_stim", u"Angle", None))
         self.pushButton_draw_rectangle.setText(QCoreApplication.translate("widget_dmd_stim", u"Draw rectangle", None))
         self.pushButton_draw_polygon.setText(QCoreApplication.translate("widget_dmd_stim", u"Draw polygon", None))
         self.pushButton_add_pattern.setText(QCoreApplication.translate("widget_dmd_stim", u"Add pattern", None))

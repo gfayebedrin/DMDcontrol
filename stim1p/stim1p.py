@@ -1,7 +1,7 @@
 from .hardware import DMD
 
 from .logic.calibration import DMDCalibration
-from .logic.geometry import PatternCoordinates, polygons_to_mask
+from .logic.geometry import AxisDefinition, PatternCoordinates, polygons_to_mask
 from .logic.saving import (
     save_pattern_sequence,
     load_pattern_sequence,
@@ -24,6 +24,7 @@ class Stim1P:
         self._calibration: DMDCalibration | None = None
         self._pattern_sequence: PatternSequence | None = None
         self._pipe_server: NamedPipeServer | None = None
+        self._axis_definition: AxisDefinition | None = None
 
     def __enter__(self):
         """Context manager entry point to connect to the DMD."""
@@ -67,7 +68,11 @@ class Stim1P:
 
         task = CancellableTask(
             lambda event: play_pattern_sequence(
-                self._dmd, self._pattern_sequence, self._calibration, stop_event=event
+                self._dmd,
+                self._pattern_sequence,
+                self._calibration,
+                stop_event=event,
+                axis_definition=self._axis_definition,
             ),
             command_key="dmd",
             start_cmd="start",
@@ -127,3 +132,8 @@ class Stim1P:
     def discard_pattern_sequence(self):
         """Discard the current pattern sequence."""
         self._pattern_sequence = None
+
+    def set_axis_definition(self, axis: AxisDefinition | None):
+        """Store the axis definition used to interpret pattern coordinates."""
+
+        self._axis_definition = axis

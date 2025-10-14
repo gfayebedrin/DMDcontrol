@@ -9,7 +9,7 @@ from datetime import timedelta, datetime
 
 # from ..hardware import DMD # TODO put that again in the future
 from ..logic.calibration import DMDCalibration
-from ..logic.geometry import polygons_to_mask
+from ..logic.geometry import AxisDefinition, axis_polygons_to_global, polygons_to_mask
 
 
 @dataclass(frozen=True)
@@ -74,7 +74,8 @@ def play_pattern_sequence(
     calibration: DMDCalibration,
     delay: timedelta = timedelta(milliseconds=-500),
     *,
-    stop_event: threading.Event | None = None
+    stop_event: threading.Event | None = None,
+    axis_definition: AxisDefinition | None = None,
 ):
     """
     Play the pattern sequence on the DMD device.
@@ -84,6 +85,9 @@ def play_pattern_sequence(
         pattern_sequence (PatternSequence): The pattern sequence to play.
         calibration (DMDCalibration): The calibration to use for the upload.
         delay (timedelta): The delay before starting the sequence. Should be negative to anticipate.
+        axis_definition (AxisDefinition | None): Axis placement used to interpret
+            pattern vertices in the object frame. If ``None`` the polygons are
+            assumed to already be expressed in the calibration frame.
     """
     t0 = datetime.now() + delay
 
@@ -93,7 +97,13 @@ def play_pattern_sequence(
         timings[0] + delay >= timedelta()
     ), "Anticipation cannot be longer than the first timing."
 
-    transformed_patterns = pattern_sequence.patterns
+    if axis_definition is not None:
+        transformed_patterns = [
+            axis_polygons_to_global(pattern, axis_definition, calibration)
+            for pattern in pattern_sequence.patterns
+        ]
+    else:
+        transformed_patterns = pattern_sequence.patterns
 
     # Upload the patterns to the DMD
     dmd.frames = [

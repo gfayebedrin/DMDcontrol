@@ -327,7 +327,7 @@
                    <string>Create grid...</string>
                   </property>
                   <property name="icon">
-                   <iconset theme="QIcon::ThemeIcon::ViewGrid"/>
+                   <iconset theme="QIcon::ThemeIcon::ListAdd"/>
                   </property>
                  </widget>
                 </item>

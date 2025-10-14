@@ -246,8 +246,7 @@ class Ui_widget_dmd_stim(object):
 
         self.pushButton_create_grid = QPushButton(self.tab_editor)
         self.pushButton_create_grid.setObjectName(u"pushButton_create_grid")
-        icon3 = QIcon(QIcon.fromTheme(QIcon.ThemeIcon.ViewGrid))
-        self.pushButton_create_grid.setIcon(icon3)
+        self.pushButton_create_grid.setIcon(icon2)
 
         self.gridLayout_patternsButtons.addWidget(self.pushButton_create_grid, 0, 1, 1, 1)
 
@@ -258,8 +257,8 @@ class Ui_widget_dmd_stim(object):
         sizePolicy1.setVerticalStretch(0)
         sizePolicy1.setHeightForWidth(self.pushButton_remove_pattern.sizePolicy().hasHeightForWidth())
         self.pushButton_remove_pattern.setSizePolicy(sizePolicy1)
-        icon4 = QIcon(QIcon.fromTheme(QIcon.ThemeIcon.EditDelete))
-        self.pushButton_remove_pattern.setIcon(icon4)
+        icon3 = QIcon(QIcon.fromTheme(QIcon.ThemeIcon.EditDelete))
+        self.pushButton_remove_pattern.setIcon(icon3)
 
         self.gridLayout_patternsButtons.addWidget(self.pushButton_remove_pattern, 0, 2, 2, 1)
 

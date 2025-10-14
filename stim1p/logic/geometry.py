@@ -212,9 +212,8 @@ def polygons_to_mask(polygons: list[np.ndarray], calibration: DMDCalibration):
     Returns:
         mask (ndarray): Boolean 2D mask with `True` inside the polygons and `False` outside.
     """
-    mask = np.zeros(calibration.dmd_shape, dtype=bool)
-
     width, height = calibration.dmd_shape
+    mask_rows_cols = np.zeros((height, width), dtype=bool)
 
     for polygon in polygons:
         polygon_dmd = calibration.micrometre_to_dmd(polygon.T).T
@@ -222,6 +221,7 @@ def polygons_to_mask(polygons: list[np.ndarray], calibration: DMDCalibration):
             polygon_dmd[:, 0] = (width - 1) - polygon_dmd[:, 0]
         if calibration.invert_y:
             polygon_dmd[:, 1] = (height - 1) - polygon_dmd[:, 1]
-        mask |= polygon2mask(calibration.dmd_shape, polygon_dmd)
+        polygon_rows_cols = polygon_dmd[:, [1, 0]]
+        mask_rows_cols |= polygon2mask((height, width), polygon_rows_cols)
 
-    return mask
+    return mask_rows_cols.T

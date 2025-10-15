@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QGuiApplication, QKeySequence
 from PySide6.QtWidgets import (
     QTreeWidgetItem,
     QMessageBox,
     QInputDialog,
     QTableWidgetItem,
 )
+try:
+    from PySide6.QtGui import QShortcut
+except ImportError:  # pragma: no cover - Qt6 moved QShortcut to QtGui
+    from PySide6.QtWidgets import QShortcut  # type: ignore[misc,attr-defined]
 
 from typing import TYPE_CHECKING, TypeVar
 
@@ -225,6 +230,10 @@ class TableManager:
     def __init__(self, widget: StimDMDWidget):
         self.widget = widget
         self._updating_table = False
+        table = self.widget.ui.tableWidget
+        self._paste_shortcut = QShortcut(QKeySequence.StandardKey.Paste, table)
+        self._paste_shortcut.setContext(Qt.ShortcutContext.WidgetShortcut)
+        self._paste_shortcut.activated.connect(self.paste_clipboard)
 
     def ensure_desc_column(self):
         """Ensure the description column exists in the table."""
@@ -294,6 +303,76 @@ class TableManager:
                 continue
             self.set_sequence_row_description(r, idx)
         self._updating_table = False
+
+    def paste_clipboard(self) -> None:
+        """Paste clipboard contents into the sequence table."""
+
+        clipboard = QGuiApplication.clipboard()
+        text = clipboard.text() if clipboard is not None else ""
+        self._apply_paste_text(text)
+
+    def _apply_paste_text(self, text: str) -> None:
+        """Insert the provided text into the table as tabular data."""
+
+        rows = self._parse_tabular_text(text)
+        if not rows:
+            return
+
+        table = self.widget.ui.tableWidget
+        start_row = table.currentRow()
+        start_col = table.currentColumn()
+        if start_row < 0:
+            start_row = table.rowCount()
+        if start_col < 0:
+            start_col = 0
+
+        required_rows = start_row + len(rows)
+        if table.rowCount() < required_rows:
+            table.setRowCount(required_rows)
+
+        self._updating_table = True
+        try:
+            self.ensure_desc_column()
+            for row_offset, row_values in enumerate(rows):
+                target_row = start_row + row_offset
+                for col_offset, value in enumerate(row_values):
+                    target_col = start_col + col_offset
+                    if target_col >= 3:
+                        continue
+                    item = table.item(target_row, target_col)
+                    if item is None:
+                        item = QTableWidgetItem("")
+                        table.setItem(target_row, target_col, item)
+                    item.setText(value)
+                idx_item = table.item(target_row, 2)
+                if idx_item is None:
+                    continue
+                try:
+                    pattern_idx = int(idx_item.text())
+                except Exception:
+                    continue
+                self.set_sequence_row_description(target_row, pattern_idx)
+        finally:
+            self._updating_table = False
+
+    @staticmethod
+    def _parse_tabular_text(text: str) -> list[list[str]]:
+        """Convert clipboard text into a matrix of strings."""
+
+        if not text:
+            return []
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+        rows: list[list[str]] = []
+        for line in text.split("\n"):
+            if not line.strip():
+                continue
+            cells = line.split("\t")
+            if len(cells) == 1:
+                cells = line.split(",")
+            cells = [cell.strip() for cell in cells]
+            if any(cell for cell in cells):
+                rows.append(cells)
+        return rows
 
     # Change handler
 

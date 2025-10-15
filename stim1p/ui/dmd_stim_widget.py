@@ -48,6 +48,7 @@ from ..logic.geometry import (
 )
 from ..logic.sequence import PatternSequence
 from ..logic import saving
+from ..stim1p import Stim1P
 
 from .qt.DMD_stim_ui import Ui_widget_dmd_stim
 from . import console, roi_manager, tree_table_manager
@@ -109,7 +110,8 @@ class _CalibrationDialog(QDialog):
         *,
         default_mirrors: tuple[int, int] = (100, 100),
         default_pixel_size: float = 1.0,
-        default_invert_axes: bool = False,
+        default_invert_x: bool = False,
+        default_invert_y: bool = False,
     ):
         super().__init__(parent)
         self.setWindowTitle("Calibrate DMD")
@@ -129,10 +131,15 @@ class _CalibrationDialog(QDialog):
         self._pixel_size.setValue(clamped_size)
         layout.addRow("Camera pixel size (µm)", self._pixel_size)
 
-        self._invert_axes = QCheckBox(self)
-        self._invert_axes.setChecked(bool(default_invert_axes))
-        self._invert_axes.setText("Flip DMD axes (X→X−x, Y→Y−y)")
-        layout.addRow(self._invert_axes)
+        self._invert_x = QCheckBox(self)
+        self._invert_x.setChecked(bool(default_invert_x))
+        self._invert_x.setText("Flip DMD X axis (X→X−x)")
+        layout.addRow(self._invert_x)
+
+        self._invert_y = QCheckBox(self)
+        self._invert_y.setChecked(bool(default_invert_y))
+        self._invert_y.setText("Flip DMD Y axis (Y→Y−y)")
+        layout.addRow(self._invert_y)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
@@ -142,8 +149,13 @@ class _CalibrationDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addRow(buttons)
 
-    def values(self) -> tuple[int, float, bool]:
-        return self._mirror_size.value(), self._pixel_size.value(), self._invert_axes.isChecked()
+    def values(self) -> tuple[int, float, bool, bool]:
+        return (
+            self._mirror_size.value(),
+            self._pixel_size.value(),
+            self._invert_x.isChecked(),
+            self._invert_y.isChecked(),
+        )
 
 
 class _GridPreviewOverlay:
@@ -283,6 +295,10 @@ class StimDMDWidget(QWidget):
         self.tree_manager = tree_table_manager.TreeManager(self)
         self.table_manager = tree_table_manager.TableManager(self)
         self._preferences = CalibrationPreferences()
+        self._run_state_timer = QTimer(self)
+        self._run_state_timer.setInterval(250)
+        self._run_state_timer.timeout.connect(self._on_run_state_check)
+        self._stim = Stim1P()
         self._grid_last_parameters = self._preferences.grid_parameters()
         if not self._grid_last_parameters.is_valid():
             self._grid_last_parameters = GridParameters()
@@ -301,6 +317,9 @@ class StimDMDWidget(QWidget):
         self._console = console.Console(self.ui.plainTextEdit_console_output)
         self._update_image_transform()
         self._update_axis_visuals()
+        self._update_dmd_controls()
+        self._update_listener_controls()
+        self._update_run_controls()
 
     @staticmethod
     def _rect_to_polygon_points(rect: QRectF) -> np.ndarray:
@@ -422,6 +441,212 @@ class StimDMDWidget(QWidget):
     def calibration(self, calibration: DMDCalibration | None):
         self._calibration = calibration
         self._update_axis_labels()
+        self._update_listener_controls()
+
+    def _toggle_dmd_connection(self) -> None:
+        """Connect or disconnect the DMD hardware via the controller."""
+
+        try:
+            if not self._stim.is_dmd_connected:
+                self._stim.connect_dmd()
+            else:
+                if self._stim.is_listening:
+                    try:
+                        self._stim.stop_listening()
+                    except Exception as exc:  # noqa: BLE001
+                        QMessageBox.critical(
+                            self,
+                            "Error stopping listener",
+                            str(exc),
+                        )
+                        return
+                if self._stim.is_running:
+                    try:
+                        self._stim.stop_run()
+                    except Exception as exc:  # noqa: BLE001
+                        QMessageBox.critical(
+                            self,
+                            "Error stopping run",
+                            str(exc),
+                        )
+                        return
+                self._stim.disconnect_dmd()
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "DMD connection error", str(exc))
+        finally:
+            self._update_dmd_controls()
+            self._update_listener_controls()
+            self._update_run_controls()
+
+    def _toggle_pipe_listener(self) -> None:
+        """Start or stop listening for MATLAB commands through the controller."""
+
+        if not self._stim.is_listening:
+            if not self._stim.is_dmd_connected:
+                QMessageBox.warning(
+                    self,
+                    "DMD disconnected",
+                    "Connect to the DMD before starting the MATLAB listener.",
+                )
+                return
+            if self._calibration is None:
+                QMessageBox.warning(
+                    self,
+                    "Calibration missing",
+                    "Load or compute a DMD calibration before listening for MATLAB commands.",
+                )
+                return
+            if not self._axis_defined:
+                QMessageBox.warning(
+                    self,
+                    "Axis definition required",
+                    "Define an axis before listening for MATLAB commands.",
+                )
+                return
+            try:
+                pattern_sequence = self.model
+            except Exception as exc:  # noqa: BLE001
+                QMessageBox.critical(
+                    self,
+                    "Pattern export failed",
+                    str(exc),
+                )
+                return
+            try:
+                self._stim.set_calibration(self._calibration)
+                self._stim.set_axis_definition(self._axis_definition())
+                self._stim.set_pattern_sequence(pattern_sequence)
+                self._stim.start_listening()
+            except Exception as exc:  # noqa: BLE001
+                QMessageBox.critical(self, "Listener error", str(exc))
+                return
+        else:
+            try:
+                self._stim.stop_listening()
+            except Exception as exc:  # noqa: BLE001
+                QMessageBox.critical(self, "Listener error", str(exc))
+                return
+        self._update_listener_controls()
+        self._update_run_controls()
+
+    def _toggle_run_now(self) -> None:
+        """Start or stop the pattern sequence directly on the DMD."""
+
+        if self._stim.is_running:
+            try:
+                self._stim.stop_run()
+            except Exception as exc:  # noqa: BLE001
+                QMessageBox.critical(self, "Run control error", str(exc))
+                return
+            finally:
+                self._update_run_controls()
+            return
+
+        if self._stim.is_listening:
+            QMessageBox.warning(
+                self,
+                "Listener active",
+                "Stop listening to MATLAB before starting a run manually.",
+            )
+            return
+        if not self._stim.is_dmd_connected:
+            QMessageBox.warning(
+                self,
+                "DMD disconnected",
+                "Connect to the DMD before starting a run.",
+            )
+            return
+        if self._calibration is None:
+            QMessageBox.warning(
+                self,
+                "Calibration missing",
+                "Load or compute a DMD calibration before starting a run.",
+            )
+            return
+        if not self._axis_defined:
+            QMessageBox.warning(
+                self,
+                "Axis definition required",
+                "Define an axis before starting a run.",
+            )
+            return
+
+        try:
+            pattern_sequence = self.model
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(
+                self,
+                "Pattern export failed",
+                str(exc),
+            )
+            return
+
+        try:
+            self._stim.set_calibration(self._calibration)
+            self._stim.set_axis_definition(self._axis_definition())
+            self._stim.set_pattern_sequence(pattern_sequence)
+            self._stim.start_run()
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "Run control error", str(exc))
+            return
+
+        self._update_run_controls()
+
+    def _update_dmd_controls(self) -> None:
+        """Update the connect button caption based on controller state."""
+
+        button = self.ui.pushButton_connect_dmd
+        if self._stim.is_dmd_connected:
+            button.setText("Disconnect DMD")
+        else:
+            button.setText("Connect to DMD")
+
+    def _update_listener_controls(self) -> None:
+        """Refresh listener button text and availability."""
+
+        button = self.ui.pushButton_listen_to_matlab
+        listening = self._stim.is_listening
+        button.setText("Stop listening" if listening else "Start listening")
+        if listening:
+            button.setEnabled(True)
+        else:
+            prerequisites_met = (
+                self._stim.is_dmd_connected
+                and self._calibration is not None
+                and self._axis_defined
+            )
+            button.setEnabled(prerequisites_met)
+        self._update_run_controls()
+
+    def _update_run_controls(self) -> None:
+        """Update the manual run button caption and availability."""
+
+        button = self.ui.pushButton_run_now
+        running = getattr(self._stim, "is_running", False)
+        button.setText("Stop run" if running else "Start run now")
+        if running:
+            button.setEnabled(True)
+            if not self._run_state_timer.isActive():
+                self._run_state_timer.start()
+            return
+        if self._run_state_timer.isActive():
+            self._run_state_timer.stop()
+        prerequisites_met = (
+            self._stim.is_dmd_connected
+            and self._calibration is not None
+            and self._axis_defined
+            and not self._stim.is_listening
+        )
+        button.setEnabled(prerequisites_met)
+
+    def _on_run_state_check(self) -> None:
+        """Poll for run completion to refresh the UI."""
+
+        if not getattr(self._stim, "is_running", False):
+            self._run_state_timer.stop()
+            self._update_run_controls()
+            return
+        self._update_run_controls()
 
     def _connect(self):
         """Wire UI widgets to their slots and manager helpers."""
@@ -446,6 +671,9 @@ class StimDMDWidget(QWidget):
         self.ui.pushButton_save_patterns.clicked.connect(self._save_file)
         self.ui.pushButton_calibrate_dmd.clicked.connect(self._calibrate_dmd)
         self.ui.pushButton_reset_image_view.clicked.connect(self._reset_image_view)
+        self.ui.pushButton_connect_dmd.clicked.connect(self._toggle_dmd_connection)
+        self.ui.pushButton_listen_to_matlab.clicked.connect(self._toggle_pipe_listener)
+        self.ui.pushButton_run_now.clicked.connect(self._toggle_run_now)
         self.ui.treeWidget.itemClicked.connect(
             lambda item, _col: self.roi_manager.show_for_item(item)
         )
@@ -1031,6 +1259,7 @@ class StimDMDWidget(QWidget):
         self._axis_defined = defined
         self._update_image_transform()
         self._update_axis_visuals()
+        self._update_listener_controls()
 
     def _apply_axis_definition(
         self,
@@ -1062,6 +1291,7 @@ class StimDMDWidget(QWidget):
         self._update_axis_visuals()
         if fit_view:
             self._fit_view_to_image()
+        self._update_listener_controls()
 
     def _install_context_menu(self) -> None:
         try:
@@ -1542,20 +1772,23 @@ class StimDMDWidget(QWidget):
             return
 
         invert_defaults = self._preferences.axes_inverted()
+        default_invert_x = bool(invert_defaults[0])
+        default_invert_y = bool(invert_defaults[1])
         dialog = _CalibrationDialog(
             self,
             default_mirrors=self._preferences.mirror_counts(),
             default_pixel_size=self._preferences.pixel_size(),
-            default_invert_axes=bool(invert_defaults[0] or invert_defaults[1]),
+            default_invert_x=default_invert_x,
+            default_invert_y=default_invert_y,
         )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             self._restore_after_calibration(previous_image, previous_view, selected_item)
             return
 
-        square_mirrors, pixel_size, invert_axes = dialog.values()
+        square_mirrors, pixel_size, invert_x, invert_y = dialog.values()
         self._preferences.set_mirror_counts(square_mirrors, square_mirrors)
         self._preferences.set_pixel_size(pixel_size)
-        self._preferences.set_axes_inverted(invert_axes, invert_axes)
+        self._preferences.set_axes_inverted(invert_x, invert_y)
         camera_shape = (
             int(calibration_image.shape[1]),
             int(calibration_image.shape[0]),
@@ -1575,8 +1808,8 @@ class StimDMDWidget(QWidget):
                 pixel_size,
                 camera_shape=camera_shape,
                 dmd_shape=dmd_shape,
-                invert_x=invert_axes,
-                invert_y=invert_axes,
+                invert_x=invert_x,
+                invert_y=invert_y,
             )
         except ValueError as exc:
             QMessageBox.warning(self, "Calibration failed", str(exc))

@@ -339,7 +339,7 @@ class Ui_widget_dmd_stim(object):
         self.stackedWidget_live_graph = QStackedWidget(self.tab_run)
         self.stackedWidget_live_graph.setObjectName(u"stackedWidget_live_graph")
 
-        self.gridLayout_3.addWidget(self.stackedWidget_live_graph, 1, 0, 1, 2)
+        self.gridLayout_3.addWidget(self.stackedWidget_live_graph, 1, 0, 1, 3)
 
         self.pushButton_connect_dmd = QPushButton(self.tab_run)
         self.pushButton_connect_dmd.setObjectName(u"pushButton_connect_dmd")
@@ -354,6 +354,12 @@ class Ui_widget_dmd_stim(object):
         self.pushButton_listen_to_matlab.setIcon(icon6)
 
         self.gridLayout_3.addWidget(self.pushButton_listen_to_matlab, 0, 1, 1, 1)
+
+        self.pushButton_run_now = QPushButton(self.tab_run)
+        self.pushButton_run_now.setObjectName(u"pushButton_run_now")
+        self.pushButton_run_now.setIcon(icon6)
+
+        self.gridLayout_3.addWidget(self.pushButton_run_now, 0, 2, 1, 1)
 
         self.tabWidget.addTab(self.tab_run, "")
 
@@ -498,6 +504,7 @@ class Ui_widget_dmd_stim(object):
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_editor), QCoreApplication.translate("widget_dmd_stim", u"Edit", None))
         self.pushButton_connect_dmd.setText(QCoreApplication.translate("widget_dmd_stim", u"Connect to DMD", None))
         self.pushButton_listen_to_matlab.setText(QCoreApplication.translate("widget_dmd_stim", u"Listen to Matlab", None))
+        self.pushButton_run_now.setText(QCoreApplication.translate("widget_dmd_stim", u"Start run now", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_run), QCoreApplication.translate("widget_dmd_stim", u"Run", None))
         self.groupBox_console_output.setTitle(QCoreApplication.translate("widget_dmd_stim", u"Console output", None))
         self.pushButton_load_image.setText(QCoreApplication.translate("widget_dmd_stim", u"Load single image", None))

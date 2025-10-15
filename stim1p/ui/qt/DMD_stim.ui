@@ -448,7 +448,7 @@
             <string>Run</string>
            </attribute>
            <layout class="QGridLayout" name="gridLayout_3">
-            <item row="1" column="0" colspan="2">
+            <item row="1" column="0" colspan="3">
              <widget class="QStackedWidget" name="stackedWidget_live_graph"/>
             </item>
             <item row="0" column="0">
@@ -465,6 +465,16 @@
              <widget class="QPushButton" name="pushButton_listen_to_matlab">
               <property name="text">
                <string>Listen to Matlab</string>
+              </property>
+             <property name="icon">
+              <iconset theme="QIcon::ThemeIcon::MediaPlaybackStart"/>
+              </property>
+             </widget>
+            </item>
+            <item row="0" column="2">
+             <widget class="QPushButton" name="pushButton_run_now">
+              <property name="text">
+               <string>Start run now</string>
               </property>
               <property name="icon">
                <iconset theme="QIcon::ThemeIcon::MediaPlaybackStart"/>

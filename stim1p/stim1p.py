@@ -50,6 +50,7 @@ class Stim1P:
         self._pattern_sequence: PatternSequence | None = None
         self._pipe_server: NamedPipeServer | None = None
         self._axis_definition: AxisDefinition | None = None
+        self._run_task: CancellableTask | None = None
 
     def __enter__(self):
         """Context manager entry point to connect to the DMD."""
@@ -130,9 +131,73 @@ class Stim1P:
         self._pipe_server.stop()
         self._pipe_server = None
 
+    @property
+    def is_running(self) -> bool:
+        """Return ``True`` when the pattern sequence is currently executing."""
+
+        return bool(self._run_task and self._run_task.is_running())
+
+    def start_run(self):
+        """Start playing the pattern sequence immediately on the connected DMD."""
+
+        if self._dmd is None:
+            raise RuntimeError("Connect to the DMD before starting a run.")
+        if self._calibration is None:
+            raise RuntimeError("Calibration must be set before starting a run.")
+        if self._pattern_sequence is None:
+            raise RuntimeError("Pattern sequence must be set before starting a run.")
+
+        if self._run_task is None:
+            self._run_task = CancellableTask(
+                lambda event: play_pattern_sequence(
+                    self._dmd,
+                    self._pattern_sequence,
+                    self._calibration,
+                    stop_event=event,
+                    axis_definition=self._axis_definition,
+                )
+            )
+
+        reply = self._run_task.start()
+
+        status = reply.get("status")
+        if status == "started":
+            return
+        if status == "already_running":
+            raise RuntimeError("Pattern sequence is already running.")
+        raise RuntimeError(f"Unable to start run (status: {status}).")
+
+    def stop_run(self):
+        """Stop the currently running pattern sequence, if any."""
+
+        if self._run_task is None:
+            return
+
+        reply = self._run_task.stop()
+        status = reply.get("status")
+        if status not in {"stopped", "not_running"}:
+            raise RuntimeError(f"Unable to stop run (status: {status}).")
+
+    @property
+    def is_dmd_connected(self) -> bool:
+        """Return ``True`` when a DMD instance is currently active."""
+
+        return self._dmd is not None
+
+    @property
+    def is_listening(self) -> bool:
+        """Return ``True`` when the named pipe server is running."""
+
+        return bool(self._pipe_server and self._pipe_server.is_alive())
+
     def load_calibration(self, filepath: str):
         """Load a calibration object from an HDF5 file."""
         self._calibration = load_calibration(filepath)
+
+    def set_calibration(self, calibration: DMDCalibration | None) -> None:
+        """Assign the calibration to use for subsequent playback."""
+
+        self._calibration = calibration
 
     def save_calibration(self, filepath: str):
         """Save the current calibration object to an HDF5 file."""
@@ -147,6 +212,11 @@ class Stim1P:
     def load_pattern_sequence(self, filepath: str):
         """Load a pattern sequence from an HDF5 file."""
         self._pattern_sequence = load_pattern_sequence(filepath)
+
+    def set_pattern_sequence(self, sequence: PatternSequence | None) -> None:
+        """Assign the in-memory pattern sequence to play back."""
+
+        self._pattern_sequence = sequence
 
     def save_pattern_sequence(self, filepath: str):
         """Save the current pattern sequence to an HDF5 file."""

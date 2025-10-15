@@ -48,6 +48,7 @@ from ..logic.geometry import (
 )
 from ..logic.sequence import PatternSequence
 from ..logic import saving
+from ..stim1p import Stim1P
 
 from .qt.DMD_stim_ui import Ui_widget_dmd_stim
 from . import console, roi_manager, tree_table_manager
@@ -283,6 +284,7 @@ class StimDMDWidget(QWidget):
         self.tree_manager = tree_table_manager.TreeManager(self)
         self.table_manager = tree_table_manager.TableManager(self)
         self._preferences = CalibrationPreferences()
+        self._stim = Stim1P()
         self._grid_last_parameters = self._preferences.grid_parameters()
         if not self._grid_last_parameters.is_valid():
             self._grid_last_parameters = GridParameters()
@@ -301,6 +303,8 @@ class StimDMDWidget(QWidget):
         self._console = console.Console(self.ui.plainTextEdit_console_output)
         self._update_image_transform()
         self._update_axis_visuals()
+        self._update_dmd_controls()
+        self._update_listener_controls()
 
     @staticmethod
     def _rect_to_polygon_points(rect: QRectF) -> np.ndarray:
@@ -422,6 +426,106 @@ class StimDMDWidget(QWidget):
     def calibration(self, calibration: DMDCalibration | None):
         self._calibration = calibration
         self._update_axis_labels()
+        self._update_listener_controls()
+
+    def _toggle_dmd_connection(self) -> None:
+        """Connect or disconnect the DMD hardware via the controller."""
+
+        try:
+            if not self._stim.is_dmd_connected:
+                self._stim.connect_dmd()
+            else:
+                if self._stim.is_listening:
+                    try:
+                        self._stim.stop_listening()
+                    except Exception as exc:  # noqa: BLE001
+                        QMessageBox.critical(
+                            self,
+                            "Error stopping listener",
+                            str(exc),
+                        )
+                        return
+                self._stim.disconnect_dmd()
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "DMD connection error", str(exc))
+        finally:
+            self._update_dmd_controls()
+            self._update_listener_controls()
+
+    def _toggle_pipe_listener(self) -> None:
+        """Start or stop listening for MATLAB commands through the controller."""
+
+        if not self._stim.is_listening:
+            if not self._stim.is_dmd_connected:
+                QMessageBox.warning(
+                    self,
+                    "DMD disconnected",
+                    "Connect to the DMD before starting the MATLAB listener.",
+                )
+                return
+            if self._calibration is None:
+                QMessageBox.warning(
+                    self,
+                    "Calibration missing",
+                    "Load or compute a DMD calibration before listening for MATLAB commands.",
+                )
+                return
+            if not self._axis_defined:
+                QMessageBox.warning(
+                    self,
+                    "Axis definition required",
+                    "Define an axis before listening for MATLAB commands.",
+                )
+                return
+            try:
+                pattern_sequence = self.model
+            except Exception as exc:  # noqa: BLE001
+                QMessageBox.critical(
+                    self,
+                    "Pattern export failed",
+                    str(exc),
+                )
+                return
+            try:
+                self._stim.set_calibration(self._calibration)
+                self._stim.set_axis_definition(self._axis_definition())
+                self._stim.set_pattern_sequence(pattern_sequence)
+                self._stim.start_listening()
+            except Exception as exc:  # noqa: BLE001
+                QMessageBox.critical(self, "Listener error", str(exc))
+                return
+        else:
+            try:
+                self._stim.stop_listening()
+            except Exception as exc:  # noqa: BLE001
+                QMessageBox.critical(self, "Listener error", str(exc))
+                return
+        self._update_listener_controls()
+
+    def _update_dmd_controls(self) -> None:
+        """Update the connect button caption based on controller state."""
+
+        button = self.ui.pushButton_connect_dmd
+        if self._stim.is_dmd_connected:
+            button.setText("Disconnect DMD")
+        else:
+            button.setText("Connect to DMD")
+
+    def _update_listener_controls(self) -> None:
+        """Refresh listener button text and availability."""
+
+        button = self.ui.pushButton_listen_to_matlab
+        listening = self._stim.is_listening
+        button.setText("Stop listening" if listening else "Start listening")
+        if listening:
+            button.setEnabled(True)
+            return
+        prerequisites_met = (
+            self._stim.is_dmd_connected
+            and self._calibration is not None
+            and self._axis_defined
+        )
+        button.setEnabled(prerequisites_met)
 
     def _connect(self):
         """Wire UI widgets to their slots and manager helpers."""
@@ -446,6 +550,8 @@ class StimDMDWidget(QWidget):
         self.ui.pushButton_save_patterns.clicked.connect(self._save_file)
         self.ui.pushButton_calibrate_dmd.clicked.connect(self._calibrate_dmd)
         self.ui.pushButton_reset_image_view.clicked.connect(self._reset_image_view)
+        self.ui.pushButton_connect_dmd.clicked.connect(self._toggle_dmd_connection)
+        self.ui.pushButton_listen_to_matlab.clicked.connect(self._toggle_pipe_listener)
         self.ui.treeWidget.itemClicked.connect(
             lambda item, _col: self.roi_manager.show_for_item(item)
         )
@@ -1031,6 +1137,7 @@ class StimDMDWidget(QWidget):
         self._axis_defined = defined
         self._update_image_transform()
         self._update_axis_visuals()
+        self._update_listener_controls()
 
     def _apply_axis_definition(
         self,
@@ -1062,6 +1169,7 @@ class StimDMDWidget(QWidget):
         self._update_axis_visuals()
         if fit_view:
             self._fit_view_to_image()
+        self._update_listener_controls()
 
     def _install_context_menu(self) -> None:
         try:

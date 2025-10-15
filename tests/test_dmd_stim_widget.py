@@ -16,8 +16,11 @@ class _DummyStim1P:
         self.disconnect_calls = 0
         self.start_calls = 0
         self.stop_calls = 0
+        self.start_run_calls = 0
+        self.stop_run_calls = 0
         self._connected = False
         self._listening = False
+        self._running = False
         self.calibration = None
         self.axis_definition = None
         self.sequence = None
@@ -29,6 +32,10 @@ class _DummyStim1P:
     @property
     def is_listening(self) -> bool:
         return self._listening
+
+    @property
+    def is_running(self) -> bool:
+        return self._running
 
     def connect_dmd(self) -> None:
         self.connect_calls += 1
@@ -49,6 +56,16 @@ class _DummyStim1P:
     def stop_listening(self) -> None:
         self.stop_calls += 1
         self._listening = False
+
+    def start_run(self) -> None:
+        if not self._connected:
+            raise RuntimeError("not connected")
+        self.start_run_calls += 1
+        self._running = True
+
+    def stop_run(self) -> None:
+        self.stop_run_calls += 1
+        self._running = False
 
     def set_calibration(self, calibration) -> None:  # noqa: ANN001
         self.calibration = calibration
@@ -86,6 +103,7 @@ def widget(monkeypatch, qapp):  # noqa: ANN001
 def test_toggle_dmd_connection_updates_controller_and_ui(widget):
     stim_widget, stim = widget
     assert stim_widget.ui.pushButton_connect_dmd.text() == "Connect to DMD"
+    assert not stim_widget.ui.pushButton_run_now.isEnabled()
 
     stim_widget._toggle_dmd_connection()
 
@@ -93,6 +111,7 @@ def test_toggle_dmd_connection_updates_controller_and_ui(widget):
     assert stim.is_dmd_connected
     assert stim_widget.ui.pushButton_connect_dmd.text() == "Disconnect DMD"
     assert not stim_widget.ui.pushButton_listen_to_matlab.isEnabled()
+    assert not stim_widget.ui.pushButton_run_now.isEnabled()
 
     stim_widget._toggle_dmd_connection()
 
@@ -120,6 +139,7 @@ def test_toggle_pipe_listener_pushes_state(widget, monkeypatch):
     stim_widget._toggle_dmd_connection()
 
     assert stim_widget.ui.pushButton_listen_to_matlab.isEnabled()
+    assert stim_widget.ui.pushButton_run_now.isEnabled()
 
     stim_widget._toggle_pipe_listener()
 
@@ -129,6 +149,7 @@ def test_toggle_pipe_listener_pushes_state(widget, monkeypatch):
     assert stim.axis_definition is not None
     assert isinstance(stim.sequence, PatternSequence)
     assert stim_widget.ui.pushButton_listen_to_matlab.text() == "Stop listening"
+    assert not stim_widget.ui.pushButton_run_now.isEnabled()
     assert not messages
 
     stim_widget._toggle_pipe_listener()
@@ -136,4 +157,40 @@ def test_toggle_pipe_listener_pushes_state(widget, monkeypatch):
     assert stim.stop_calls == 1
     assert not stim.is_listening
     assert stim_widget.ui.pushButton_listen_to_matlab.text() == "Start listening"
+    assert stim_widget.ui.pushButton_run_now.isEnabled()
+    assert not messages
+
+
+def test_run_now_button_starts_and_stops_sequence(widget, monkeypatch):
+    stim_widget, stim = widget
+    messages: list[tuple[str, tuple]] = []
+
+    def _record(kind):
+        def _recorder(*args):
+            messages.append((kind, args))
+            return None
+
+        return _recorder
+
+    monkeypatch.setattr(dmd_stim_widget.QMessageBox, "warning", _record("warning"))
+    monkeypatch.setattr(dmd_stim_widget.QMessageBox, "critical", _record("critical"))
+
+    stim_widget.calibration = object()
+    stim_widget._set_axis_state([0.0, 0.0], 0.0, True)
+    stim_widget._toggle_dmd_connection()
+
+    assert stim_widget.ui.pushButton_run_now.isEnabled()
+
+    stim_widget._toggle_run_now()
+
+    assert stim.start_run_calls == 1
+    assert stim.is_running
+    assert stim_widget.ui.pushButton_run_now.text() == "Stop run"
+    assert not messages
+
+    stim_widget._toggle_run_now()
+
+    assert stim.stop_run_calls == 1
+    assert not stim.is_running
+    assert stim_widget.ui.pushButton_run_now.text() == "Start run now"
     assert not messages

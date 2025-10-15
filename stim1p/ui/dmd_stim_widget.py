@@ -284,6 +284,9 @@ class StimDMDWidget(QWidget):
         self.tree_manager = tree_table_manager.TreeManager(self)
         self.table_manager = tree_table_manager.TableManager(self)
         self._preferences = CalibrationPreferences()
+        self._run_state_timer = QTimer(self)
+        self._run_state_timer.setInterval(250)
+        self._run_state_timer.timeout.connect(self._on_run_state_check)
         self._stim = Stim1P()
         self._grid_last_parameters = self._preferences.grid_parameters()
         if not self._grid_last_parameters.is_valid():
@@ -305,6 +308,7 @@ class StimDMDWidget(QWidget):
         self._update_axis_visuals()
         self._update_dmd_controls()
         self._update_listener_controls()
+        self._update_run_controls()
 
     @staticmethod
     def _rect_to_polygon_points(rect: QRectF) -> np.ndarray:
@@ -445,12 +449,23 @@ class StimDMDWidget(QWidget):
                             str(exc),
                         )
                         return
+                if self._stim.is_running:
+                    try:
+                        self._stim.stop_run()
+                    except Exception as exc:  # noqa: BLE001
+                        QMessageBox.critical(
+                            self,
+                            "Error stopping run",
+                            str(exc),
+                        )
+                        return
                 self._stim.disconnect_dmd()
         except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(self, "DMD connection error", str(exc))
         finally:
             self._update_dmd_controls()
             self._update_listener_controls()
+            self._update_run_controls()
 
     def _toggle_pipe_listener(self) -> None:
         """Start or stop listening for MATLAB commands through the controller."""
@@ -501,6 +516,70 @@ class StimDMDWidget(QWidget):
                 QMessageBox.critical(self, "Listener error", str(exc))
                 return
         self._update_listener_controls()
+        self._update_run_controls()
+
+    def _toggle_run_now(self) -> None:
+        """Start or stop the pattern sequence directly on the DMD."""
+
+        if self._stim.is_running:
+            try:
+                self._stim.stop_run()
+            except Exception as exc:  # noqa: BLE001
+                QMessageBox.critical(self, "Run control error", str(exc))
+                return
+            finally:
+                self._update_run_controls()
+            return
+
+        if self._stim.is_listening:
+            QMessageBox.warning(
+                self,
+                "Listener active",
+                "Stop listening to MATLAB before starting a run manually.",
+            )
+            return
+        if not self._stim.is_dmd_connected:
+            QMessageBox.warning(
+                self,
+                "DMD disconnected",
+                "Connect to the DMD before starting a run.",
+            )
+            return
+        if self._calibration is None:
+            QMessageBox.warning(
+                self,
+                "Calibration missing",
+                "Load or compute a DMD calibration before starting a run.",
+            )
+            return
+        if not self._axis_defined:
+            QMessageBox.warning(
+                self,
+                "Axis definition required",
+                "Define an axis before starting a run.",
+            )
+            return
+
+        try:
+            pattern_sequence = self.model
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(
+                self,
+                "Pattern export failed",
+                str(exc),
+            )
+            return
+
+        try:
+            self._stim.set_calibration(self._calibration)
+            self._stim.set_axis_definition(self._axis_definition())
+            self._stim.set_pattern_sequence(pattern_sequence)
+            self._stim.start_run()
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "Run control error", str(exc))
+            return
+
+        self._update_run_controls()
 
     def _update_dmd_controls(self) -> None:
         """Update the connect button caption based on controller state."""
@@ -519,13 +598,44 @@ class StimDMDWidget(QWidget):
         button.setText("Stop listening" if listening else "Start listening")
         if listening:
             button.setEnabled(True)
+        else:
+            prerequisites_met = (
+                self._stim.is_dmd_connected
+                and self._calibration is not None
+                and self._axis_defined
+            )
+            button.setEnabled(prerequisites_met)
+        self._update_run_controls()
+
+    def _update_run_controls(self) -> None:
+        """Update the manual run button caption and availability."""
+
+        button = self.ui.pushButton_run_now
+        running = getattr(self._stim, "is_running", False)
+        button.setText("Stop run" if running else "Start run now")
+        if running:
+            button.setEnabled(True)
+            if not self._run_state_timer.isActive():
+                self._run_state_timer.start()
             return
+        if self._run_state_timer.isActive():
+            self._run_state_timer.stop()
         prerequisites_met = (
             self._stim.is_dmd_connected
             and self._calibration is not None
             and self._axis_defined
+            and not self._stim.is_listening
         )
         button.setEnabled(prerequisites_met)
+
+    def _on_run_state_check(self) -> None:
+        """Poll for run completion to refresh the UI."""
+
+        if not getattr(self._stim, "is_running", False):
+            self._run_state_timer.stop()
+            self._update_run_controls()
+            return
+        self._update_run_controls()
 
     def _connect(self):
         """Wire UI widgets to their slots and manager helpers."""
@@ -552,6 +662,7 @@ class StimDMDWidget(QWidget):
         self.ui.pushButton_reset_image_view.clicked.connect(self._reset_image_view)
         self.ui.pushButton_connect_dmd.clicked.connect(self._toggle_dmd_connection)
         self.ui.pushButton_listen_to_matlab.clicked.connect(self._toggle_pipe_listener)
+        self.ui.pushButton_run_now.clicked.connect(self._toggle_run_now)
         self.ui.treeWidget.itemClicked.connect(
             lambda item, _col: self.roi_manager.show_for_item(item)
         )

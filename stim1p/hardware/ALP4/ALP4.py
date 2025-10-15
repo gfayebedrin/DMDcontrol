@@ -1139,12 +1139,13 @@ class ALP4(object):
         if (SequenceId is None) and (self._lastDDRseq):
             SequenceId = self._lastDDRseq
 
-        self.Seqs.remove(SequenceId)  # Removes the last SequenceId from sequence list
-        self._checkError(
-            self._ALPLib.AlpSeqFree(self.ALP_ID, SequenceId),
-            "Unable to free the image sequence.",
-            warning=True,
-        )
+        if SequenceId in self.Seqs:
+            self.Seqs.remove(SequenceId)  # Removes the last SequenceId from sequence list
+            self._checkError(
+                self._ALPLib.AlpSeqFree(self.ALP_ID, SequenceId),
+                "Unable to free the image sequence.",
+                warning=True,
+            )
 
     def Run(self, SequenceId=None, loop=True):
         """

@@ -110,7 +110,8 @@ class _CalibrationDialog(QDialog):
         *,
         default_mirrors: tuple[int, int] = (100, 100),
         default_pixel_size: float = 1.0,
-        default_invert_axes: bool = False,
+        default_invert_x: bool = False,
+        default_invert_y: bool = False,
     ):
         super().__init__(parent)
         self.setWindowTitle("Calibrate DMD")
@@ -130,10 +131,15 @@ class _CalibrationDialog(QDialog):
         self._pixel_size.setValue(clamped_size)
         layout.addRow("Camera pixel size (µm)", self._pixel_size)
 
-        self._invert_axes = QCheckBox(self)
-        self._invert_axes.setChecked(bool(default_invert_axes))
-        self._invert_axes.setText("Flip DMD axes (X→X−x, Y→Y−y)")
-        layout.addRow(self._invert_axes)
+        self._invert_x = QCheckBox(self)
+        self._invert_x.setChecked(bool(default_invert_x))
+        self._invert_x.setText("Flip DMD X axis (X→X−x)")
+        layout.addRow(self._invert_x)
+
+        self._invert_y = QCheckBox(self)
+        self._invert_y.setChecked(bool(default_invert_y))
+        self._invert_y.setText("Flip DMD Y axis (Y→Y−y)")
+        layout.addRow(self._invert_y)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
@@ -143,8 +149,13 @@ class _CalibrationDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addRow(buttons)
 
-    def values(self) -> tuple[int, float, bool]:
-        return self._mirror_size.value(), self._pixel_size.value(), self._invert_axes.isChecked()
+    def values(self) -> tuple[int, float, bool, bool]:
+        return (
+            self._mirror_size.value(),
+            self._pixel_size.value(),
+            self._invert_x.isChecked(),
+            self._invert_y.isChecked(),
+        )
 
 
 class _GridPreviewOverlay:
@@ -1761,20 +1772,23 @@ class StimDMDWidget(QWidget):
             return
 
         invert_defaults = self._preferences.axes_inverted()
+        default_invert_x = bool(invert_defaults[0])
+        default_invert_y = bool(invert_defaults[1])
         dialog = _CalibrationDialog(
             self,
             default_mirrors=self._preferences.mirror_counts(),
             default_pixel_size=self._preferences.pixel_size(),
-            default_invert_axes=bool(invert_defaults[0] or invert_defaults[1]),
+            default_invert_x=default_invert_x,
+            default_invert_y=default_invert_y,
         )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             self._restore_after_calibration(previous_image, previous_view, selected_item)
             return
 
-        square_mirrors, pixel_size, invert_axes = dialog.values()
+        square_mirrors, pixel_size, invert_x, invert_y = dialog.values()
         self._preferences.set_mirror_counts(square_mirrors, square_mirrors)
         self._preferences.set_pixel_size(pixel_size)
-        self._preferences.set_axes_inverted(invert_axes, invert_axes)
+        self._preferences.set_axes_inverted(invert_x, invert_y)
         camera_shape = (
             int(calibration_image.shape[1]),
             int(calibration_image.shape[0]),
@@ -1794,8 +1808,8 @@ class StimDMDWidget(QWidget):
                 pixel_size,
                 camera_shape=camera_shape,
                 dmd_shape=dmd_shape,
-                invert_x=invert_axes,
-                invert_y=invert_axes,
+                invert_x=invert_x,
+                invert_y=invert_y,
             )
         except ValueError as exc:
             QMessageBox.warning(self, "Calibration failed", str(exc))

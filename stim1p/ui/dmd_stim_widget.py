@@ -2376,6 +2376,7 @@ class StimDMDWidget(QWidget):
             axis_grp = analysis_grp.create_group("axis")
             axis_grp.attrs["defined"] = bool(self._axis_defined)
             axis_grp.attrs["coordinate_system"] = "camera_pixels"
+            axis_grp.attrs["camera_shape"] = np.asarray(calibration.camera_shape, dtype=np.int64)
             if self._axis_defined:
                 axis_grp.create_dataset(
                     "origin_camera",
@@ -2400,6 +2401,8 @@ class StimDMDWidget(QWidget):
             descriptions = model.descriptions or []
             shape_types = model.shape_types or []
 
+            axis_def = self._axis_definition()
+
             for pattern_index, pattern in enumerate(model.patterns):
                 pattern_grp = patterns_grp.create_group(f"pattern_{pattern_index}")
                 if pattern_index < len(descriptions) and descriptions[pattern_index]:
@@ -2411,7 +2414,7 @@ class StimDMDWidget(QWidget):
                     if self._axis_defined:
                         global_um = axis_micrometre_to_global(
                             points,
-                            self._axis_definition(),
+                            axis_def,
                             calibration,
                         )
                     else:

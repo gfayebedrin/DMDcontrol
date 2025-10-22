@@ -140,7 +140,7 @@
            </widget>
           </item>
           <item>
-           <widget class="QPushButton" name="pushButton_save_patterns">
+          <widget class="QPushButton" name="pushButton_save_patterns">
             <property name="text">
              <string>Save</string>
             </property>
@@ -149,6 +149,32 @@
             </property>
             <property name="shortcut">
              <string>Ctrl+S</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="pushButton_save_patterns_as">
+            <property name="text">
+             <string>Save As…</string>
+            </property>
+            <property name="icon">
+             <iconset theme="QIcon::ThemeIcon::DocumentSaveAs"/>
+            </property>
+            <property name="toolTip">
+             <string>Save the pattern sequence to a new file</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="pushButton_export_patterns">
+            <property name="text">
+             <string>Export for analysis</string>
+            </property>
+            <property name="icon">
+             <iconset theme="QIcon::ThemeIcon::DocumentSend"/>
+            </property>
+            <property name="toolTip">
+             <string>Export sequence with axis metadata for offline analysis</string>
             </property>
            </widget>
           </item>

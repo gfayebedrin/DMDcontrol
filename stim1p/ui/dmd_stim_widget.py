@@ -7,6 +7,7 @@ from PIL import Image
 from datetime import timedelta
 from dataclasses import dataclass
 from typing import Sequence
+import h5py
 
 from PySide6.QtCore import (
     QEvent,
@@ -60,6 +61,9 @@ from .capture_tools import (
     InteractiveRectangleCapture,
     PolygonDrawingCapture,
 )
+
+
+_HDF5_FILE_FILTER = "HDF5 files (*.h5 *.hdf5);;All files (*)"
 
 
 class _MicrometreAxisItem(pg.AxisItem):
@@ -739,6 +743,8 @@ class StimDMDWidget(QWidget):
         self.ui.pushButton_new_file.clicked.connect(self._new_model)
         self.ui.pushButton_load_patterns.clicked.connect(self._load_patterns_file)
         self.ui.pushButton_save_patterns.clicked.connect(self._save_file)
+        self.ui.pushButton_save_patterns_as.clicked.connect(self._save_file_as)
+        self.ui.pushButton_export_patterns.clicked.connect(self._export_patterns_for_analysis)
         self.ui.pushButton_calibrate_dmd.clicked.connect(self._calibrate_dmd)
         self.ui.pushButton_reset_image_view.clicked.connect(self._reset_image_view)
         self.ui.pushButton_connect_dmd.clicked.connect(self._toggle_dmd_connection)
@@ -2187,6 +2193,7 @@ class StimDMDWidget(QWidget):
         self.model = PatternSequence(
             patterns=[], sequence=[], timings=[], durations=[], descriptions=[]
         )
+        self.ui.lineEdit_file_path.clear()
         print("Loaded empty PatternSequence")
 
     def _read_table_ms(self):
@@ -2223,7 +2230,13 @@ class StimDMDWidget(QWidget):
         self._updating_table = False
 
     def _load_patterns_file(self):
-        file_path = QFileDialog.getOpenFileName(self, "Select file", "", "")[0]
+        initial = self.ui.lineEdit_file_path.text().strip()
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select pattern sequence",
+            initial if initial else "",
+            _HDF5_FILE_FILTER,
+        )
         if not file_path:
             return
         if self._calibration is None:
@@ -2238,23 +2251,172 @@ class StimDMDWidget(QWidget):
         except RuntimeError as exc:
             QMessageBox.warning(self, "Calibration required", str(exc))
             return
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "Load failed", str(exc))
+            return
         self.ui.lineEdit_file_path.setText(file_path)
         print(f"Loaded PatternSequence from {file_path}")
 
-    def _save_file(self):
-        file_path = self.ui.lineEdit_file_path.text()
-        if not file_path:
-            file_path = QFileDialog.getSaveFileName(self, "Save file", "", "")[0]
-            if not file_path:
+    def _save_file(self) -> None:
+        model = self._collect_model()
+        if model is None:
+            return
+        current_path = self.ui.lineEdit_file_path.text().strip()
+        if not current_path:
+            target_path = self._prompt_save_path("Save pattern sequence", "")
+            if not target_path:
                 return
-            self.ui.lineEdit_file_path.setText(file_path)
+        else:
+            target_path = self._ensure_h5_extension(current_path)
+        saved_path = self._write_pattern_sequence(target_path, model)
+        if saved_path:
+            self.ui.lineEdit_file_path.setText(saved_path)
+
+    def _save_file_as(self) -> None:
+        model = self._collect_model()
+        if model is None:
+            return
+        current_path = self.ui.lineEdit_file_path.text().strip()
+        target_path = self._prompt_save_path("Save pattern sequence as", current_path)
+        if not target_path:
+            return
+        saved_path = self._write_pattern_sequence(target_path, model)
+        if saved_path:
+            self.ui.lineEdit_file_path.setText(saved_path)
+
+    def _export_patterns_for_analysis(self) -> None:
+        model = self._collect_model()
+        if model is None:
+            return
+        current_path = self.ui.lineEdit_file_path.text().strip()
+        target_path = self._prompt_save_path("Export pattern sequence", current_path)
+        if not target_path:
+            return
+        saved_path = self._write_pattern_sequence(target_path, model, silent=True)
+        if not saved_path:
+            return
         try:
-            model = self.model
+            self._write_analysis_metadata(saved_path, model)
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.warning(
+                self,
+                "Export incomplete",
+                "Pattern sequence saved, but analysis metadata could not be written.\n"
+                f"Reason: {exc}",
+            )
+            return
+        print(f"Exported PatternSequence with analysis metadata to {saved_path}")
+
+    def _collect_model(self) -> PatternSequence | None:
+        try:
+            return self.model
         except RuntimeError as exc:
             QMessageBox.warning(self, "Calibration required", str(exc))
-            return
-        saving.save_pattern_sequence(file_path, model)
-        print(f"Saved PatternSequence to {file_path}")
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "Pattern export failed", str(exc))
+        return None
+
+    def _prompt_save_path(self, title: str, initial_path: str) -> str:
+        initial = initial_path.strip()
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            title,
+            initial if initial else "",
+            _HDF5_FILE_FILTER,
+        )
+        if not file_path:
+            return ""
+        return self._ensure_h5_extension(file_path)
+
+    @staticmethod
+    def _ensure_h5_extension(path: str) -> str:
+        trimmed = path.strip()
+        if not trimmed:
+            return ""
+        candidate = Path(trimmed)
+        if candidate.suffix.lower() in {".h5", ".hdf5"}:
+            return str(candidate)
+        return str(candidate.with_suffix(".h5"))
+
+    def _write_pattern_sequence(
+        self,
+        file_path: str,
+        model: PatternSequence,
+        *,
+        silent: bool = False,
+    ) -> str | None:
+        target = self._ensure_h5_extension(file_path)
+        if not target:
+            return None
+        try:
+            saving.save_pattern_sequence(target, model)
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "Save failed", str(exc))
+            return None
+        if not silent:
+            print(f"Saved PatternSequence to {target}")
+        return target
+
+    def _write_analysis_metadata(
+        self,
+        file_path: str,
+        model: PatternSequence,
+    ) -> None:
+        if self._calibration is None:
+            raise RuntimeError("A calibration must be available to export analysis metadata.")
+        calibration = self._calibration
+        with h5py.File(file_path, "a") as handle:
+            if "analysis" in handle:
+                del handle["analysis"]
+            analysis_grp = handle.create_group("analysis")
+            analysis_grp.attrs["version"] = 1
+            analysis_grp.attrs["generator"] = "StimDMDWidget"
+
+            axis_grp = analysis_grp.create_group("axis")
+            axis_grp.attrs["defined"] = bool(self._axis_defined)
+            if self._axis_defined:
+                axis_grp.create_dataset(
+                    "origin_camera",
+                    data=np.asarray(self._axis_origin_camera, dtype=np.float64),
+                )
+                axis_grp.create_dataset(
+                    "angle_rad",
+                    data=np.array(self._axis_angle_rad, dtype=np.float64),
+                )
+                try:
+                    origin_um = self._axis_origin_micrometre()
+                    axis_grp.create_dataset(
+                        "origin_micrometre",
+                        data=np.asarray(origin_um, dtype=np.float64),
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+
+            patterns_grp = analysis_grp.create_group("patterns_image")
+            patterns_grp.attrs["coordinate_system"] = "camera_image_normalised"
+
+            descriptions = model.descriptions or []
+            shape_types = model.shape_types or []
+
+            for pattern_index, pattern in enumerate(model.patterns):
+                pattern_grp = patterns_grp.create_group(f"pattern_{pattern_index}")
+                if pattern_index < len(descriptions) and descriptions[pattern_index]:
+                    pattern_grp.attrs["description"] = descriptions[pattern_index]
+                for poly_index, polygon in enumerate(pattern):
+                    points = np.asarray(polygon, dtype=np.float64)
+                    if points.ndim != 2 or points.shape[1] != 2:
+                        continue
+                    image_points = calibration.micrometre_to_image(points.T).T
+                    dataset = pattern_grp.create_dataset(
+                        f"polygon_{poly_index}", data=image_points
+                    )
+                    if (
+                        pattern_index < len(shape_types)
+                        and poly_index < len(shape_types[pattern_index])
+                    ):
+                        dataset.attrs["shape_type"] = str(
+                            shape_types[pattern_index][poly_index]
+                        )
 
     def _add_row_table(self):
         self.ui.tableWidget.insertRow(self.ui.tableWidget.rowCount())

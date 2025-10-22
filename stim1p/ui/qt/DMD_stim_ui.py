@@ -117,6 +117,20 @@ class Ui_widget_dmd_stim(object):
 
         self.horizontalLayout_patternLoading.addWidget(self.pushButton_save_patterns)
 
+        self.pushButton_save_patterns_as = QPushButton(self.verticalLayoutWidget)
+        self.pushButton_save_patterns_as.setObjectName(u"pushButton_save_patterns_as")
+        icon2 = QIcon(QIcon.fromTheme(QIcon.ThemeIcon.DocumentSaveAs))
+        self.pushButton_save_patterns_as.setIcon(icon2)
+
+        self.horizontalLayout_patternLoading.addWidget(self.pushButton_save_patterns_as)
+
+        self.pushButton_export_patterns = QPushButton(self.verticalLayoutWidget)
+        self.pushButton_export_patterns.setObjectName(u"pushButton_export_patterns")
+        icon3 = QIcon(QIcon.fromTheme(QIcon.ThemeIcon.DocumentSend))
+        self.pushButton_export_patterns.setIcon(icon3)
+
+        self.horizontalLayout_patternLoading.addWidget(self.pushButton_export_patterns)
+
 
         self.verticalLayout_controls.addLayout(self.horizontalLayout_patternLoading)
 
@@ -239,14 +253,14 @@ class Ui_widget_dmd_stim(object):
 
         self.pushButton_add_pattern = QPushButton(self.tab_editor)
         self.pushButton_add_pattern.setObjectName(u"pushButton_add_pattern")
-        icon2 = QIcon(QIcon.fromTheme(QIcon.ThemeIcon.ListAdd))
-        self.pushButton_add_pattern.setIcon(icon2)
+        icon4 = QIcon(QIcon.fromTheme(QIcon.ThemeIcon.ListAdd))
+        self.pushButton_add_pattern.setIcon(icon4)
 
         self.gridLayout_patternsButtons.addWidget(self.pushButton_add_pattern, 0, 0, 1, 1)
 
         self.pushButton_create_grid = QPushButton(self.tab_editor)
         self.pushButton_create_grid.setObjectName(u"pushButton_create_grid")
-        self.pushButton_create_grid.setIcon(icon2)
+        self.pushButton_create_grid.setIcon(icon4)
 
         self.gridLayout_patternsButtons.addWidget(self.pushButton_create_grid, 0, 1, 1, 1)
 
@@ -257,8 +271,8 @@ class Ui_widget_dmd_stim(object):
         sizePolicy1.setVerticalStretch(0)
         sizePolicy1.setHeightForWidth(self.pushButton_remove_pattern.sizePolicy().hasHeightForWidth())
         self.pushButton_remove_pattern.setSizePolicy(sizePolicy1)
-        icon3 = QIcon(QIcon.fromTheme(QIcon.ThemeIcon.EditDelete))
-        self.pushButton_remove_pattern.setIcon(icon3)
+        icon5 = QIcon(QIcon.fromTheme(QIcon.ThemeIcon.EditDelete))
+        self.pushButton_remove_pattern.setIcon(icon5)
 
         self.gridLayout_patternsButtons.addWidget(self.pushButton_remove_pattern, 0, 2, 2, 1)
 
@@ -304,14 +318,14 @@ class Ui_widget_dmd_stim(object):
         self.gridLayout.setContentsMargins(-1, 0, -1, -1)
         self.pushButton_add_row = QPushButton(self.tab_editor)
         self.pushButton_add_row.setObjectName(u"pushButton_add_row")
-        self.pushButton_add_row.setIcon(icon2)
+        self.pushButton_add_row.setIcon(icon4)
 
         self.gridLayout.addWidget(self.pushButton_add_row, 0, 0, 1, 1)
 
         self.pushButton_remove_row = QPushButton(self.tab_editor)
         self.pushButton_remove_row.setObjectName(u"pushButton_remove_row")
-        icon4 = QIcon(QIcon.fromTheme(QIcon.ThemeIcon.ListRemove))
-        self.pushButton_remove_row.setIcon(icon4)
+        icon6 = QIcon(QIcon.fromTheme(QIcon.ThemeIcon.ListRemove))
+        self.pushButton_remove_row.setIcon(icon6)
 
         self.gridLayout.addWidget(self.pushButton_remove_row, 0, 1, 1, 1)
 
@@ -343,21 +357,21 @@ class Ui_widget_dmd_stim(object):
 
         self.pushButton_connect_dmd = QPushButton(self.tab_run)
         self.pushButton_connect_dmd.setObjectName(u"pushButton_connect_dmd")
-        icon5 = QIcon(QIcon.fromTheme(QIcon.ThemeIcon.NetworkWired))
-        self.pushButton_connect_dmd.setIcon(icon5)
+        icon7 = QIcon(QIcon.fromTheme(QIcon.ThemeIcon.NetworkWired))
+        self.pushButton_connect_dmd.setIcon(icon7)
 
         self.gridLayout_3.addWidget(self.pushButton_connect_dmd, 0, 0, 1, 1)
 
         self.pushButton_listen_to_matlab = QPushButton(self.tab_run)
         self.pushButton_listen_to_matlab.setObjectName(u"pushButton_listen_to_matlab")
-        icon6 = QIcon(QIcon.fromTheme(QIcon.ThemeIcon.MediaPlaybackStart))
-        self.pushButton_listen_to_matlab.setIcon(icon6)
+        icon8 = QIcon(QIcon.fromTheme(QIcon.ThemeIcon.MediaPlaybackStart))
+        self.pushButton_listen_to_matlab.setIcon(icon8)
 
         self.gridLayout_3.addWidget(self.pushButton_listen_to_matlab, 0, 1, 1, 1)
 
         self.pushButton_run_now = QPushButton(self.tab_run)
         self.pushButton_run_now.setObjectName(u"pushButton_run_now")
-        self.pushButton_run_now.setIcon(icon6)
+        self.pushButton_run_now.setIcon(icon8)
 
         self.gridLayout_3.addWidget(self.pushButton_run_now, 0, 2, 1, 1)
 
@@ -394,15 +408,15 @@ class Ui_widget_dmd_stim(object):
         self.horizontalLayout_image_controls.setObjectName(u"horizontalLayout_image_controls")
         self.pushButton_load_image = QPushButton(self.layoutWidget)
         self.pushButton_load_image.setObjectName(u"pushButton_load_image")
-        icon7 = QIcon(QIcon.fromTheme(QIcon.ThemeIcon.InsertImage))
-        self.pushButton_load_image.setIcon(icon7)
+        icon9 = QIcon(QIcon.fromTheme(QIcon.ThemeIcon.InsertImage))
+        self.pushButton_load_image.setIcon(icon9)
 
         self.horizontalLayout_image_controls.addWidget(self.pushButton_load_image)
 
         self.pushButton_reset_image_view = QPushButton(self.layoutWidget)
         self.pushButton_reset_image_view.setObjectName(u"pushButton_reset_image_view")
-        icon8 = QIcon(QIcon.fromTheme(QIcon.ThemeIcon.ViewRefresh))
-        self.pushButton_reset_image_view.setIcon(icon8)
+        icon10 = QIcon(QIcon.fromTheme(QIcon.ThemeIcon.ViewRefresh))
+        self.pushButton_reset_image_view.setIcon(icon10)
 
         self.horizontalLayout_image_controls.addWidget(self.pushButton_reset_image_view)
 
@@ -431,7 +445,7 @@ class Ui_widget_dmd_stim(object):
 
         self.pushButton_refresh_image = QPushButton(self.layoutWidget)
         self.pushButton_refresh_image.setObjectName(u"pushButton_refresh_image")
-        self.pushButton_refresh_image.setIcon(icon8)
+        self.pushButton_refresh_image.setIcon(icon10)
 
         self.horizontalLayout_image_folder.addWidget(self.pushButton_refresh_image)
 
@@ -475,6 +489,14 @@ class Ui_widget_dmd_stim(object):
 #if QT_CONFIG(shortcut)
         self.pushButton_save_patterns.setShortcut(QCoreApplication.translate("widget_dmd_stim", u"Ctrl+S", None))
 #endif // QT_CONFIG(shortcut)
+        self.pushButton_save_patterns_as.setText(QCoreApplication.translate("widget_dmd_stim", u"Save As\u2026", None))
+#if QT_CONFIG(tooltip)
+        self.pushButton_save_patterns_as.setToolTip(QCoreApplication.translate("widget_dmd_stim", u"Save the pattern sequence to a new file", None))
+#endif // QT_CONFIG(tooltip)
+        self.pushButton_export_patterns.setText(QCoreApplication.translate("widget_dmd_stim", u"Export for analysis", None))
+#if QT_CONFIG(tooltip)
+        self.pushButton_export_patterns.setToolTip(QCoreApplication.translate("widget_dmd_stim", u"Export sequence with axis metadata for offline analysis", None))
+#endif // QT_CONFIG(tooltip)
         self.label_patterns.setText(QCoreApplication.translate("widget_dmd_stim", u"Patterns", None))
         self.groupBox_roi_properties.setTitle(QCoreApplication.translate("widget_dmd_stim", u"ROI properties", None))
         self.label_roi_placeholder.setText(QCoreApplication.translate("widget_dmd_stim", u"Select an ROI to edit its properties.", None))

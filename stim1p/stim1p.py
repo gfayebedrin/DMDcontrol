@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import numpy as np
+
 try:
     from .hardware import DMD as _DMD_CLASS
 except ImportError as exc:  # pragma: no cover - exercised when drivers are absent
@@ -51,6 +53,7 @@ class Stim1P:
         self._pipe_server: NamedPipeServer | None = None
         self._axis_definition: AxisDefinition | None = None
         self._run_task: CancellableTask | None = None
+        self._listener_task: CancellableTask | None = None
 
     def __enter__(self):
         """Context manager entry point to connect to the DMD."""
@@ -82,6 +85,43 @@ class Stim1P:
         self._dmd.free()
         self._dmd = None
 
+    def dmd_shape(self) -> tuple[int, int] | None:
+        """Return the shape of the connected DMD in mirrors (width, height)."""
+
+        if self._dmd is None:
+            return None
+        try:
+            width, height = self._dmd.shape
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError("Unable to query DMD shape.") from exc
+        return int(width), int(height)
+
+    def display_calibration_frame(self, square_size: int) -> None:
+        """Show a single calibration frame with a centred bright square."""
+
+        if self._dmd is None:
+            raise RuntimeError("Connect to the DMD before sending a calibration frame.")
+        if self.is_running:
+            raise RuntimeError("Stop the running pattern sequence before sending a calibration frame.")
+        if self.is_listening:
+            raise RuntimeError("Stop the MATLAB listener before sending a calibration frame.")
+        if square_size <= 0:
+            raise ValueError("Square size must be a positive integer.")
+
+        shape = self.dmd_shape()
+        if shape is None:
+            raise RuntimeError("Unable to determine the DMD shape.")
+        width, height = shape
+        size = int(square_size)
+        size = max(1, min(size, width, height))
+
+        frame = np.zeros((width, height), dtype=bool)
+        x_start = (width - size) // 2
+        y_start = (height - size) // 2
+        frame[x_start : x_start + size, y_start : y_start + size] = True
+
+        self._dmd.frames = frame[np.newaxis, ...]
+
     def start_listening(self, pipe_name: str = r"\\.\pipe\MatPy"):
         """Start the named pipe server to listen for commands.
 
@@ -106,10 +146,12 @@ class Stim1P:
             raise RuntimeError(
                 "Pattern sequence must be set before starting the server."
             )
+        if self.is_running:
+            raise RuntimeError("Pattern sequence is already running.")
         if self._pipe_server is not None and self._pipe_server.is_alive():
             raise RuntimeError("Pipe server is already running.")
 
-        task = CancellableTask(
+        self._listener_task = CancellableTask(
             lambda event: play_pattern_sequence(
                 self._dmd,
                 self._pattern_sequence,
@@ -121,7 +163,7 @@ class Stim1P:
             start_cmd="start",
             stop_cmd="stop",
         )
-        self._pipe_server = NamedPipeServer(name=pipe_name, callback=task)
+        self._pipe_server = NamedPipeServer(name=pipe_name, callback=self._listener_task)
         self._pipe_server.start()
 
     def stop_listening(self):
@@ -130,12 +172,16 @@ class Stim1P:
             return
         self._pipe_server.stop()
         self._pipe_server = None
+        self._listener_task = None
 
     @property
     def is_running(self) -> bool:
         """Return ``True`` when the pattern sequence is currently executing."""
 
-        return bool(self._run_task and self._run_task.is_running())
+        return any(
+            task is not None and task.is_running()
+            for task in (self._run_task, self._listener_task)
+        )
 
     def start_run(self):
         """Start playing the pattern sequence immediately on the connected DMD."""
@@ -146,6 +192,8 @@ class Stim1P:
             raise RuntimeError("Calibration must be set before starting a run.")
         if self._pattern_sequence is None:
             raise RuntimeError("Pattern sequence must be set before starting a run.")
+        if self.is_running:
+            raise RuntimeError("Pattern sequence is already running.")
 
         if self._run_task is None:
             self._run_task = CancellableTask(
@@ -170,13 +218,19 @@ class Stim1P:
     def stop_run(self):
         """Stop the currently running pattern sequence, if any."""
 
-        if self._run_task is None:
+        if not self.is_running:
             return
 
-        reply = self._run_task.stop()
-        status = reply.get("status")
-        if status not in {"stopped", "not_running"}:
-            raise RuntimeError(f"Unable to stop run (status: {status}).")
+        errors: list[str] = []
+        for task in (self._run_task, self._listener_task):
+            if task is None or not task.is_running():
+                continue
+            reply = task.stop()
+            status = reply.get("status")
+            if status not in {"stopped", "not_running"}:
+                errors.append(status or "unknown")
+        if errors:
+            raise RuntimeError(f"Unable to stop run (status: {', '.join(errors)}).")
 
     @property
     def is_dmd_connected(self) -> bool:

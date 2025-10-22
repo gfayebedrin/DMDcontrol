@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QHeaderView,
     QSpinBox,
+    QSizePolicy,
     QTableWidgetItem,
     QTreeWidgetItem,
     QWidget,
@@ -156,6 +157,74 @@ class _CalibrationDialog(QDialog):
             self._invert_x.isChecked(),
             self._invert_y.isChecked(),
         )
+
+
+class _CalibrationPreparationDialog(QDialog):
+    """Ask the user whether to display a calibration frame before proceeding."""
+
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        default_square_size: int = 100,
+        can_send: bool = False,
+        max_square_size: int | None = None,
+    ):
+        super().__init__(parent)
+        self.setWindowTitle("Prepare Calibration")
+        self._chosen_action: str | None = "skip"
+
+        layout = QFormLayout(self)
+
+        message = QLabel(self)
+        message.setText(
+            "Send a bright square to the DMD before selecting\n"
+            "the calibration image?"
+        )
+        message.setWordWrap(True)
+        message.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        layout.addRow(message)
+
+        self._square_size = QSpinBox(self)
+        self._square_size.setRange(1, 8192)
+        if max_square_size is not None:
+            self._square_size.setMaximum(max(1, int(max_square_size)))
+        self._square_size.setValue(max(1, int(default_square_size)))
+        layout.addRow("Square size (mirrors)", self._square_size)
+
+        button_box = QDialogButtonBox(parent=self)
+        send_button = QPushButton("Send to DMD", self)
+        send_button.setEnabled(can_send)
+        if not can_send:
+            send_button.setToolTip("Connect to the DMD to send a calibration frame.")
+        skip_button = QPushButton("Continue without sending", self)
+        skip_button.setDefault(True)
+        cancel_button = button_box.addButton(
+            QDialogButtonBox.StandardButton.Cancel
+        )
+        button_box.addButton(send_button, QDialogButtonBox.ButtonRole.AcceptRole)
+        button_box.addButton(skip_button, QDialogButtonBox.ButtonRole.AcceptRole)
+        layout.addRow(button_box)
+
+        send_button.clicked.connect(self._on_send_clicked)
+        skip_button.clicked.connect(self._on_skip_clicked)
+        cancel_button.clicked.connect(self.reject)
+
+    def _on_send_clicked(self) -> None:
+        if not self.sender() or not self.sender().isEnabled():
+            return
+        self._chosen_action = "send"
+        self.accept()
+
+    def _on_skip_clicked(self) -> None:
+        self._chosen_action = "skip"
+        self.accept()
+
+    def chosen_action(self) -> str | None:
+        return self._chosen_action
+
+    def square_size(self) -> int:
+        return int(self._square_size.value())
 
 
 class _GridPreviewOverlay:
@@ -299,6 +368,7 @@ class StimDMDWidget(QWidget):
         self._run_state_timer.setInterval(250)
         self._run_state_timer.timeout.connect(self._on_run_state_check)
         self._stim = Stim1P()
+        self._run_button_default_stylesheet = self.ui.pushButton_run_now.styleSheet()
         self._grid_last_parameters = self._preferences.grid_parameters()
         if not self._grid_last_parameters.is_valid():
             self._grid_last_parameters = GridParameters()
@@ -623,29 +693,29 @@ class StimDMDWidget(QWidget):
 
         button = self.ui.pushButton_run_now
         running = getattr(self._stim, "is_running", False)
-        button.setText("Stop run" if running else "Start run now")
+        listening = getattr(self._stim, "is_listening", False)
+        button.setText("Stop run now" if running else "Start run now")
         if running:
             button.setEnabled(True)
-            if not self._run_state_timer.isActive():
-                self._run_state_timer.start()
-            return
-        if self._run_state_timer.isActive():
+            button.setStyleSheet("background-color: #c62828; color: white;")
+        else:
+            button.setStyleSheet(self._run_button_default_stylesheet)
+            prerequisites_met = (
+                self._stim.is_dmd_connected
+                and self._calibration is not None
+                and self._axis_defined
+                and not self._stim.is_listening
+            )
+            button.setEnabled(prerequisites_met)
+        monitor_state = running or listening
+        if monitor_state and not self._run_state_timer.isActive():
+            self._run_state_timer.start()
+        elif not monitor_state and self._run_state_timer.isActive():
             self._run_state_timer.stop()
-        prerequisites_met = (
-            self._stim.is_dmd_connected
-            and self._calibration is not None
-            and self._axis_defined
-            and not self._stim.is_listening
-        )
-        button.setEnabled(prerequisites_met)
 
     def _on_run_state_check(self) -> None:
         """Poll for run completion to refresh the UI."""
 
-        if not getattr(self._stim, "is_running", False):
-            self._run_state_timer.stop()
-            self._update_run_controls()
-            return
         self._update_run_controls()
 
     def _connect(self):
@@ -1319,7 +1389,22 @@ class StimDMDWidget(QWidget):
             folder = os.path.dirname(last_image_path)
             if folder:
                 self.ui.lineEdit_image_folder_path.setText(folder)
-        QTimer.singleShot(0, self._ensure_calibration_available)
+        QTimer.singleShot(0, self._auto_connect_then_prepare)
+
+    def _auto_connect_then_prepare(self) -> None:
+        self._attempt_auto_connect()
+        self._update_dmd_controls()
+        self._update_listener_controls()
+        self._update_run_controls()
+        self._ensure_calibration_available()
+
+    def _attempt_auto_connect(self) -> None:
+        if self._stim.is_dmd_connected:
+            return
+        try:
+            self._stim.connect_dmd()
+        except Exception as exc:  # noqa: BLE001
+            print(f"Automatic DMD connection failed: {exc}")
 
     def _ensure_calibration_available(self) -> None:
         stored_path = self.last_calibration_file_path()
@@ -1711,8 +1796,59 @@ class StimDMDWidget(QWidget):
                 f"Unable to load calibration file:\n{error}",
             )
 
+    def _prompt_calibration_preparation(self) -> tuple[str, int] | None:
+        mirror_counts = self._preferences.mirror_counts()
+        default_mirror = int(
+            max(1, round(0.5 * (float(mirror_counts[0]) + float(mirror_counts[1]))))
+        )
+        dmd_shape: tuple[int, int] | None
+        try:
+            dmd_shape = self._stim.dmd_shape()
+        except Exception:  # noqa: BLE001
+            dmd_shape = None
+
+        dialog = _CalibrationPreparationDialog(
+            self,
+            default_square_size=default_mirror,
+            can_send=self._stim.is_dmd_connected,
+            max_square_size=min(dmd_shape) if dmd_shape is not None else None,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return None
+        action = dialog.chosen_action()
+        size = dialog.square_size()
+        if action is None:
+            return None
+        return action, size
+
+    def _send_calibration_frame(self, square_size: int) -> bool:
+        if not self._stim.is_dmd_connected:
+            QMessageBox.information(
+                self,
+                "DMD disconnected",
+                "Connect to the DMD before sending a calibration frame.",
+            )
+            return False
+        try:
+            self._stim.display_calibration_frame(square_size)
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.warning(
+                self,
+                "Calibration frame error",
+                str(exc),
+            )
+            return False
+        return True
+
     def _define_new_calibration(self) -> None:
         """Guide the user through loading a calibration image and storing it."""
+
+        preparation = self._prompt_calibration_preparation()
+        if preparation is None:
+            return
+        action, square_size = preparation
+        if action == "send":
+            self._send_calibration_frame(square_size)
 
         initial_dir = self.ui.lineEdit_image_folder_path.text().strip()
         stored_image_path = self._preferences.last_calibration_image_path()
@@ -1774,9 +1910,12 @@ class StimDMDWidget(QWidget):
         invert_defaults = self._preferences.axes_inverted()
         default_invert_x = bool(invert_defaults[0])
         default_invert_y = bool(invert_defaults[1])
+        default_mirrors = self._preferences.mirror_counts()
+        if action == "send":
+            default_mirrors = (int(square_size), int(square_size))
         dialog = _CalibrationDialog(
             self,
-            default_mirrors=self._preferences.mirror_counts(),
+            default_mirrors=default_mirrors,
             default_pixel_size=self._preferences.pixel_size(),
             default_invert_x=default_invert_x,
             default_invert_y=default_invert_y,

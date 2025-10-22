@@ -334,10 +334,10 @@ class Ui_widget_dmd_stim(object):
 
         self.gridLayout.addWidget(self.pushButton_3, 1, 0, 1, 1)
 
-        self.pushButton_4 = QPushButton(self.tab_editor)
-        self.pushButton_4.setObjectName(u"pushButton_4")
+        self.pushButton_cycle_patterns = QPushButton(self.tab_editor)
+        self.pushButton_cycle_patterns.setObjectName(u"pushButton_cycle_patterns")
 
-        self.gridLayout.addWidget(self.pushButton_4, 1, 1, 1, 1)
+        self.gridLayout.addWidget(self.pushButton_cycle_patterns, 1, 1, 1, 1)
 
 
         self.verticalLayout_sequence.addLayout(self.gridLayout)
@@ -522,7 +522,7 @@ class Ui_widget_dmd_stim(object):
         self.pushButton_add_row.setText(QCoreApplication.translate("widget_dmd_stim", u"Add row", None))
         self.pushButton_remove_row.setText(QCoreApplication.translate("widget_dmd_stim", u"Remove row", None))
         self.pushButton_3.setText(QCoreApplication.translate("widget_dmd_stim", u"Add series...", None))
-        self.pushButton_4.setText(QCoreApplication.translate("widget_dmd_stim", u"Cycle patterns...", None))
+        self.pushButton_cycle_patterns.setText(QCoreApplication.translate("widget_dmd_stim", u"Cycle patterns...", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_editor), QCoreApplication.translate("widget_dmd_stim", u"Edit", None))
         self.pushButton_connect_dmd.setText(QCoreApplication.translate("widget_dmd_stim", u"Connect to DMD", None))
         self.pushButton_listen_to_matlab.setText(QCoreApplication.translate("widget_dmd_stim", u"Listen to Matlab", None))

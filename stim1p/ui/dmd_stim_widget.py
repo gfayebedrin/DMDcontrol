@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
     QTreeWidgetItem,
     QWidget,
     QFrame,
+    QVBoxLayout,
 )
 import pyqtgraph as pg
 
@@ -231,6 +232,80 @@ class _CalibrationPreparationDialog(QDialog):
     def square_size(self) -> int:
         return int(self._square_size.value())
 
+
+class _CyclePatternsDialog(QDialog):
+    """Collect parameters required to generate cycle/repeat table entries."""
+
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        default_first_time: int = 0,
+        default_cycle_count: int = 1,
+        default_repeat_count: int = 1,
+        default_repeat_gap: int = 100,
+        default_cycle_gap: int = 250,
+        default_duration: int = 100,
+    ):
+        super().__init__(parent)
+        self.setWindowTitle("Cycle patterns")
+        main_layout = QVBoxLayout(self)
+        form = QFormLayout()
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+
+        self._cycle_count = QSpinBox(self)
+        self._cycle_count.setRange(1, 1_000_000)
+        self._cycle_count.setValue(max(1, int(default_cycle_count)))
+        form.addRow("Number of cycles", self._cycle_count)
+
+        self._repeat_count = QSpinBox(self)
+        self._repeat_count.setRange(1, 1_000_000)
+        self._repeat_count.setValue(max(1, int(default_repeat_count)))
+        form.addRow("Repetitions per pattern", self._repeat_count)
+
+        self._first_time = QSpinBox(self)
+        self._first_time.setRange(0, 3_600_000)
+        self._first_time.setSingleStep(10)
+        self._first_time.setValue(max(0, int(default_first_time)))
+        form.addRow("First pattern time (ms)", self._first_time)
+
+        self._repeat_gap = QSpinBox(self)
+        self._repeat_gap.setRange(0, 3_600_000)
+        self._repeat_gap.setSingleStep(10)
+        self._repeat_gap.setValue(max(0, int(default_repeat_gap)))
+        form.addRow("Separation between repetitions (ms)", self._repeat_gap)
+
+        self._cycle_gap = QSpinBox(self)
+        self._cycle_gap.setRange(0, 3_600_000)
+        self._cycle_gap.setSingleStep(10)
+        self._cycle_gap.setValue(max(0, int(default_cycle_gap)))
+        form.addRow("Additional gap between cycles (ms)", self._cycle_gap)
+
+        self._duration = QSpinBox(self)
+        self._duration.setRange(1, 3_600_000)
+        self._duration.setSingleStep(10)
+        self._duration.setValue(max(1, int(default_duration)))
+        form.addRow("Duration for each entry (ms)", self._duration)
+
+        main_layout.addLayout(form)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            parent=self,
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        main_layout.addWidget(buttons)
+
+    def values(self) -> dict[str, int | str]:
+        return {
+            "cycle_count": int(self._cycle_count.value()),
+            "repeat_count": int(self._repeat_count.value()),
+            "first_time_ms": int(self._first_time.value()),
+            "repeat_gap_ms": int(self._repeat_gap.value()),
+            "cycle_gap_ms": int(self._cycle_gap.value()),
+            "duration_ms": int(self._duration.value()),
+        }
 
 class _GridPreviewOverlay:
     """Render a temporary preview of rectangles on top of the plot."""
@@ -746,6 +821,7 @@ class StimDMDWidget(QWidget):
         self.ui.pushButton_save_patterns.clicked.connect(self._save_file)
         self.ui.pushButton_save_patterns_as.clicked.connect(self._save_file_as)
         self.ui.pushButton_export_patterns.clicked.connect(self._export_patterns_for_analysis)
+        self.ui.pushButton_cycle_patterns.clicked.connect(self._cycle_patterns)
         self.ui.pushButton_calibrate_dmd.clicked.connect(self._calibrate_dmd)
         self.ui.pushButton_reset_image_view.clicked.connect(self._reset_image_view)
         self.ui.pushButton_connect_dmd.clicked.connect(self._toggle_dmd_connection)
@@ -2440,3 +2516,90 @@ class StimDMDWidget(QWidget):
         )
         for r in rows:
             self.ui.tableWidget.removeRow(r)
+
+    def _cycle_patterns(self) -> None:
+        pattern_count = self.ui.treeWidget.topLevelItemCount()
+        if pattern_count <= 0:
+            QMessageBox.information(
+                self,
+                "No patterns",
+                "Create at least one pattern before cycling them.",
+            )
+            return
+
+        table = self.ui.tableWidget
+        last_time = 0
+        if table.rowCount() > 0:
+            last_item = table.item(table.rowCount() - 1, 0)
+            if last_item is not None:
+                try:
+                    last_time = int(last_item.text())
+                except Exception:
+                    last_time = 0
+
+        default_repeat_gap = 100
+        default_cycle_gap = 250
+        default_duration = 100
+        default_first_time = last_time + default_repeat_gap if table.rowCount() > 0 else 0
+
+        dialog = _CyclePatternsDialog(
+            self,
+            default_first_time=default_first_time,
+            default_cycle_count=1,
+            default_repeat_count=1,
+            default_repeat_gap=default_repeat_gap,
+            default_cycle_gap=default_cycle_gap,
+            default_duration=default_duration,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        params = dialog.values()
+        cycle_count = max(1, int(params["cycle_count"]))
+        repeat_count = max(1, int(params["repeat_count"]))
+        first_time = int(params["first_time_ms"])
+        repeat_gap = int(params["repeat_gap_ms"])
+        cycle_gap = int(params["cycle_gap_ms"])
+        duration = int(params["duration_ms"])
+
+        if cycle_count <= 0 or repeat_count <= 0:
+            return
+
+        entries: list[tuple[int, int]] = []
+        current_time = first_time
+
+        for cycle_index in range(cycle_count):
+            for pattern_idx in range(pattern_count):
+                for repeat_index in range(repeat_count):
+                    entries.append((pattern_idx, current_time))
+                    is_last_entry = (
+                        cycle_index == cycle_count - 1
+                        and pattern_idx == pattern_count - 1
+                        and repeat_index == repeat_count - 1
+                    )
+                    if is_last_entry:
+                        continue
+                    current_time += repeat_gap
+                    end_of_cycle = (
+                        repeat_index == repeat_count - 1
+                        and pattern_idx == pattern_count - 1
+                    )
+                    if end_of_cycle:
+                        current_time += cycle_gap
+
+        if not entries:
+            return
+
+        self.table_manager.ensure_desc_column()
+        signals_were_blocked = self.ui.tableWidget.blockSignals(True)
+        try:
+            for pattern_idx, start_time in entries:
+                row = table.rowCount()
+                table.insertRow(row)
+                table.setItem(row, 0, QTableWidgetItem(str(start_time)))
+                table.setItem(row, 1, QTableWidgetItem(str(duration)))
+                table.setItem(row, 2, QTableWidgetItem(str(pattern_idx)))
+                self.table_manager.set_sequence_row_description(row, pattern_idx)
+        finally:
+            self.ui.tableWidget.blockSignals(signals_were_blocked)
+        self.table_manager.refresh_sequence_descriptions()

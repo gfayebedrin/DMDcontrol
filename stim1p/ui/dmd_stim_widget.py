@@ -46,6 +46,7 @@ from ..logic.geometry import (
     AxisDefinition,
     axis_micrometre_scale,
     axis_micrometre_to_axis_pixels,
+    axis_micrometre_to_global,
     axis_pixels_to_axis_micrometre,
 )
 from ..logic.sequence import PatternSequence
@@ -2374,6 +2375,7 @@ class StimDMDWidget(QWidget):
 
             axis_grp = analysis_grp.create_group("axis")
             axis_grp.attrs["defined"] = bool(self._axis_defined)
+            axis_grp.attrs["coordinate_system"] = "camera_pixels"
             if self._axis_defined:
                 axis_grp.create_dataset(
                     "origin_camera",
@@ -2392,8 +2394,8 @@ class StimDMDWidget(QWidget):
                 except Exception:  # noqa: BLE001
                     pass
 
-            patterns_grp = analysis_grp.create_group("patterns_image")
-            patterns_grp.attrs["coordinate_system"] = "camera_image_normalised"
+            patterns_grp = analysis_grp.create_group("patterns_camera")
+            patterns_grp.attrs["coordinate_system"] = "camera_pixels"
 
             descriptions = model.descriptions or []
             shape_types = model.shape_types or []
@@ -2406,9 +2408,17 @@ class StimDMDWidget(QWidget):
                     points = np.asarray(polygon, dtype=np.float64)
                     if points.ndim != 2 or points.shape[1] != 2:
                         continue
-                    image_points = calibration.micrometre_to_image(points.T).T
+                    if self._axis_defined:
+                        global_um = axis_micrometre_to_global(
+                            points,
+                            self._axis_definition(),
+                            calibration,
+                        )
+                    else:
+                        global_um = points
+                    camera_points = calibration.micrometre_to_camera(global_um.T).T
                     dataset = pattern_grp.create_dataset(
-                        f"polygon_{poly_index}", data=image_points
+                        f"polygon_{poly_index}", data=camera_points
                     )
                     if (
                         pattern_index < len(shape_types)

@@ -161,7 +161,13 @@ if NAMED_PIPE_SUPPORTED:
                 self.callback.stop()
 
             if self._pipe is not None:
-                _CancelIoEx(self._pipe, None)
+                handle = self._pipe
+                # PyHANDLE instances from pywin32 are not directly convertible to void*
+                try:
+                    handle_value = int(handle)
+                except (TypeError, ValueError):
+                    handle_value = getattr(handle, "handle", handle)
+                _CancelIoEx(wt.HANDLE(handle_value), None)
                 self._pipe = None
 
             if self.is_alive():

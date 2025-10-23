@@ -2281,10 +2281,16 @@ class StimDMDWidget(QWidget):
             d_item = self.ui.tableWidget.item(r, 1)
             s_item = self.ui.tableWidget.item(r, 2)
             try:
-                if t_item and d_item and s_item:
-                    t = int(t_item.text())
-                    d = int(d_item.text())
-                    s = int(s_item.text())
+                if t_item and s_item:
+                    t_text = (t_item.text() or "").strip()
+                    s_text = (s_item.text() or "").strip()
+                    if not t_text or not s_text:
+                        continue
+                    d_text = (d_item.text() if d_item else "") or ""
+                    d_text = d_text.strip()
+                    t = int(t_text)
+                    d = int(d_text) if d_text else 0
+                    s = int(s_text)
                     timings.append(t)
                     durations.append(d)
                     sequence.append(s)

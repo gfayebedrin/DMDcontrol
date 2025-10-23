@@ -361,6 +361,7 @@ class StimDMDWidget(QWidget):
         self.ui = Ui_widget_dmd_stim()
         self.ui.setupUi(self)
         self.setObjectName(name)
+        self.setWindowTitle("1-photon stimulations (DMD control)")
         self.last_roi = None
         self.dmd = dmd
         self._calibration: DMDCalibration | None = None

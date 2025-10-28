@@ -1,4 +1,13 @@
-"""Calibration workflow helpers used by :class:`StimDMDWidget`."""
+"""Calibration workflow helpers used by :class:`StimDMDWidget`.
+
+The calibration routines manage several UI flows: prompting the user to capture
+new calibration imagery, sending calibration frames to the hardware, and
+persisting the resulting :class:`~stim1p.logic.calibration.DMDCalibration`
+objects.  The original widget bundled these responsibilities directly inside
+event handlers, which made it hard to understand the overall flow.  The mixin
+documented below keeps the procedural steps in one place and adds commentary so
+future maintainers can follow the user journey end-to-end.
+"""
 
 from __future__ import annotations
 
@@ -14,7 +23,13 @@ from ..capture_tools import AxisCapture
 from ..dmd_dialogs import CalibrationDialog, CalibrationPreparationDialog
 
 class CalibrationWorkflowMixin:
-    """Mixin collecting the calibration related routines."""
+    """Mixin collecting the calibration related routines.
+
+    The mixin expects the widget to expose ``self._stim``, ``self.ui`` and a
+    ``self._preferences`` object.  Each helper is documented with the user
+    interaction it supports, making it easier to adjust the workflow without
+    accidentally omitting a state restoration step.
+    """
 
     _last_calibration_file_path: str
     _current_image: np.ndarray | None
@@ -32,6 +47,14 @@ class CalibrationWorkflowMixin:
         return self._last_calibration_file_path
 
     def _ensure_calibration_available(self) -> None:
+        """Ensure a calibration exists by loading a stored file or prompting.
+
+        This helper centralises the "lazy loading" behaviour used by actions
+        that require calibration data.  If the previously stored file cannot be
+        loaded we immediately fall back to guiding the user through the full
+        calibration wizard.
+        """
+
         stored_path = self.last_calibration_file_path()
         if stored_path:
             success, _ = self._load_calibration_from_path(stored_path)
@@ -40,6 +63,8 @@ class CalibrationWorkflowMixin:
         self._calibrate_dmd()
 
     def _calibrate_dmd(self) -> None:
+        """Handle the top-level calibration choice dialog."""
+
         action = self._prompt_calibration_action()
         if action is None:
             return
@@ -49,6 +74,8 @@ class CalibrationWorkflowMixin:
             self._define_new_calibration()
 
     def _prompt_calibration_action(self) -> str | None:
+        """Ask the user whether to load a calibration file or create a new one."""
+
         prompt = QMessageBox(self)
         prompt.setWindowTitle("Calibrate DMD")
         prompt.setIcon(QMessageBox.Icon.Question)
@@ -78,6 +105,8 @@ class CalibrationWorkflowMixin:
         return None
 
     def _load_calibration_from_dialog(self) -> None:
+        """Open a file dialog and load the selected calibration file."""
+
         last_path = self.last_calibration_file_path()
         initial = ""
         if last_path:
@@ -106,6 +135,13 @@ class CalibrationWorkflowMixin:
             )
 
     def _prompt_calibration_preparation(self) -> tuple[str, int] | None:
+        """Prepare the user for capturing a calibration image.
+
+        The dialog both determines the calibration square size and optionally
+        allows sending the calibration pattern to the DMD hardware before the
+        image is captured.
+        """
+
         mirror_counts = self._preferences.mirror_counts()
         default_mirror = int(
             max(1, round(0.5 * (float(mirror_counts[0]) + float(mirror_counts[1]))))
@@ -130,6 +166,8 @@ class CalibrationWorkflowMixin:
         return action, size
 
     def _send_calibration_frame(self, square_size: int) -> bool:
+        """Display the calibration pattern on the DMD if connected."""
+
         if not self._stim.is_dmd_connected:
             QMessageBox.information(
                 self,
@@ -276,6 +314,8 @@ class CalibrationWorkflowMixin:
         self._restore_after_calibration(previous_image, previous_view, selected_item)
 
     def _prompt_save_calibration(self, calibration: DMDCalibration) -> None:
+        """Ask the user if they want to persist the computed calibration."""
+
         response = QMessageBox.question(
             self,
             "Save calibration",
@@ -310,6 +350,8 @@ class CalibrationWorkflowMixin:
         self._save_calibration_to_path(calibration, file_path)
 
     def _save_calibration_to_path(self, calibration: DMDCalibration, file_path: str) -> bool:
+        """Persist ``calibration`` to ``file_path`` and update the MRU list."""
+
         path = Path(str(file_path)).expanduser()
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -329,7 +371,12 @@ class CalibrationWorkflowMixin:
         return True
 
     def _load_calibration_from_path(self, path_str: str) -> tuple[bool, str | None]:
-        """Load calibration from disk and activate it."""
+        """Load calibration from disk and activate it.
+
+        Returns a ``(success, error_message)`` tuple mirroring the legacy
+        implementation so callers can distinguish between cancellations and
+        actual errors.
+        """
 
         path = Path(str(path_str)).expanduser()
         try:
@@ -381,6 +428,8 @@ class CalibrationWorkflowMixin:
     def _capture_view_state(
         self,
     ) -> tuple[tuple[float, float], tuple[float, float]] | None:
+        """Remember the current view box range so it can be restored later."""
+
         view = self._get_view_box()
         try:
             x_range, y_range = view.viewRange()
@@ -394,6 +443,8 @@ class CalibrationWorkflowMixin:
         previous_view_range: tuple[tuple[float, float], tuple[float, float]] | None,
         selected_item,
     ) -> None:
+        """Return the widget to the state it had before running calibration."""
+
         if previous_image is not None:
             self._set_image(previous_image, auto_contrast=True)
             if previous_view_range is not None:

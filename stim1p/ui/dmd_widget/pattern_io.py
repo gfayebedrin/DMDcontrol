@@ -1,4 +1,11 @@
-"""Pattern sequence import/export helpers for :class:`StimDMDWidget`."""
+"""Pattern sequence import/export helpers for :class:`StimDMDWidget`.
+
+The pattern table in the widget doubles as both a UI editor and an interface to
+persist experiments.  This module documents how the pieces fit together:
+reading/writing table contents, serialising pattern metadata and exporting
+analysis information alongside the raw sequence.  Adding commentary here keeps
+the high-level responsibilities close to the implementation.
+"""
 
 from __future__ import annotations
 
@@ -15,11 +22,19 @@ from ...logic.sequence import PatternSequence
 
 
 class PatternSequenceIOMixin:
-    """Mixin bundling pattern table handling and persistence helpers."""
+    """Mixin bundling pattern table handling and persistence helpers.
+
+    The mixin is responsible for translating the mutable table widget state into
+    :class:`~stim1p.logic.sequence.PatternSequence` objects and vice versa.  It
+    also encapsulates how files are located so UI code can focus on wiring
+    signals.
+    """
 
     _calibration: DMDCalibration | None
 
     def _read_table_ms(self):
+        """Extract timing/duration/sequence columns from the pattern table."""
+
         timings, durations, sequence = [], [], []
         rows = self.ui.tableWidget.rowCount()
         for r in range(rows):
@@ -45,6 +60,8 @@ class PatternSequenceIOMixin:
         return timings, durations, sequence
 
     def _write_table_ms(self, model: PatternSequence):
+        """Populate the pattern table with values from ``model``."""
+
         t_ms = model.timings_milliseconds
         d_ms = model.durations_milliseconds
         seq = model.sequence
@@ -59,6 +76,8 @@ class PatternSequenceIOMixin:
         self._updating_table = False
 
     def _collect_model(self) -> PatternSequence | None:
+        """Return the current :class:`PatternSequence` or surface validation errors."""
+
         try:
             return self.model
         except RuntimeError as exc:
@@ -68,6 +87,8 @@ class PatternSequenceIOMixin:
         return None
 
     def _prompt_save_path(self, title: str, initial_path: str) -> str:
+        """Prompt the user for a file path and normalise the extension."""
+
         initial = initial_path.strip()
         file_path, _ = QFileDialog.getSaveFileName(
             self,
@@ -81,6 +102,8 @@ class PatternSequenceIOMixin:
 
     @staticmethod
     def _ensure_h5_extension(path: str) -> str:
+        """Append ``.h5`` to ``path`` if no HDF5-compatible suffix is present."""
+
         trimmed = path.strip()
         if not trimmed:
             return ""
@@ -96,6 +119,8 @@ class PatternSequenceIOMixin:
         *,
         silent: bool = False,
     ) -> str | None:
+        """Serialise ``model`` to disk and optionally announce the destination."""
+
         target = self._ensure_h5_extension(file_path)
         if not target:
             return None
@@ -113,6 +138,8 @@ class PatternSequenceIOMixin:
         file_path: str,
         model: PatternSequence,
     ) -> None:
+        """Append coordinate metadata to the exported pattern sequence file."""
+
         if self._calibration is None:
             raise RuntimeError("A calibration must be available to export analysis metadata.")
         calibration = self._calibration
@@ -182,6 +209,8 @@ class PatternSequenceIOMixin:
                         )
 
     def _load_patterns_file(self):
+        """Load a pattern sequence from disk and populate the editor."""
+
         initial = self.ui.lineEdit_file_path.text().strip()
         file_path, _ = QFileDialog.getOpenFileName(
             self,
@@ -210,6 +239,8 @@ class PatternSequenceIOMixin:
         print(f"Loaded PatternSequence from {file_path}")
 
     def _save_file(self) -> None:
+        """Save the current pattern sequence, prompting for a path if necessary."""
+
         model = self._collect_model()
         if model is None:
             return
@@ -225,6 +256,8 @@ class PatternSequenceIOMixin:
             self.ui.lineEdit_file_path.setText(saved_path)
 
     def _save_file_as(self) -> None:
+        """Always prompt for a location before saving the current sequence."""
+
         model = self._collect_model()
         if model is None:
             return
@@ -237,6 +270,8 @@ class PatternSequenceIOMixin:
             self.ui.lineEdit_file_path.setText(saved_path)
 
     def _export_patterns_for_analysis(self) -> None:
+        """Persist the sequence and supplement it with analysis metadata."""
+
         model = self._collect_model()
         if model is None:
             return
@@ -260,6 +295,8 @@ class PatternSequenceIOMixin:
         print(f"Exported PatternSequence with analysis metadata to {saved_path}")
 
     def _new_model(self):
+        """Reset the editor to an empty :class:`PatternSequence`."""
+
         self.model = PatternSequence(
             patterns=[], sequence=[], timings=[], durations=[], descriptions=[]
         )
@@ -267,9 +304,13 @@ class PatternSequenceIOMixin:
         print("Loaded empty PatternSequence")
 
     def _add_row_table(self):
+        """Insert a new empty row at the bottom of the pattern table."""
+
         self.ui.tableWidget.insertRow(self.ui.tableWidget.rowCount())
 
     def _remove_row_table(self):
+        """Delete any selected rows from the pattern table."""
+
         rows = sorted(
             {i.row() for i in self.ui.tableWidget.selectedIndexes()}, reverse=True
         )
@@ -277,6 +318,8 @@ class PatternSequenceIOMixin:
             self.ui.tableWidget.removeRow(r)
 
     def _cycle_patterns(self) -> None:
+        """Expand the table so each pattern is repeated according to user input."""
+
         pattern_count = self.ui.treeWidget.topLevelItemCount()
         if pattern_count <= 0:
             QMessageBox.information(
@@ -329,6 +372,9 @@ class PatternSequenceIOMixin:
         for cycle_index in range(cycle_count):
             for pattern_idx in range(pattern_count):
                 for repeat_index in range(repeat_count):
+                    # Each ``entries`` tuple stores the pattern index and the
+                    # start time for a single presentation.  We build the full
+                    # list first to keep the table mutation isolated below.
                     entries.append((pattern_idx, current_time))
                     is_last_entry = (
                         cycle_index == cycle_count - 1

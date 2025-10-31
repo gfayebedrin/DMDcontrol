@@ -131,7 +131,9 @@ def axis_definition_components(
     return origin_um, scales, unit_vectors
 
 
-def axis_micrometre_scale(axis: AxisDefinition, calibration: DMDCalibration) -> np.ndarray:
+def axis_micrometre_scale(
+    axis: AxisDefinition, calibration: DMDCalibration
+) -> np.ndarray:
     """Return the micrometre-per-unit scale along each axis of ``axis``."""
 
     _, scales, _ = axis_definition_components(axis, calibration)
@@ -196,7 +198,9 @@ def axis_polygons_to_mask(
 ):
     """Render axis-frame polygons into a DMD mask."""
 
-    return polygons_to_mask(axis_polygons_to_global(polygons, axis, calibration), calibration)
+    return polygons_to_mask(
+        axis_polygons_to_global(polygons, axis, calibration), calibration
+    )
 
 
 def polygons_to_mask(polygons: list[np.ndarray], calibration: DMDCalibration):

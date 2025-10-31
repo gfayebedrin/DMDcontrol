@@ -124,14 +124,6 @@ class Ui_widget_dmd_stim(object):
 
         self.horizontalLayout_patternLoading.addWidget(self.pushButton_save_patterns_as)
 
-        self.pushButton_export_patterns = QPushButton(self.verticalLayoutWidget)
-        self.pushButton_export_patterns.setObjectName(u"pushButton_export_patterns")
-        icon3 = QIcon(QIcon.fromTheme(QIcon.ThemeIcon.DocumentSend))
-        self.pushButton_export_patterns.setIcon(icon3)
-
-        self.horizontalLayout_patternLoading.addWidget(self.pushButton_export_patterns)
-
-
         self.verticalLayout_controls.addLayout(self.horizontalLayout_patternLoading)
 
         self.tabWidget = QTabWidget(self.verticalLayoutWidget)
@@ -493,10 +485,6 @@ class Ui_widget_dmd_stim(object):
 #if QT_CONFIG(tooltip)
         self.pushButton_save_patterns_as.setToolTip(QCoreApplication.translate("widget_dmd_stim", u"Save the pattern sequence to a new file", None))
 #endif // QT_CONFIG(tooltip)
-        self.pushButton_export_patterns.setText(QCoreApplication.translate("widget_dmd_stim", u"Export for analysis", None))
-#if QT_CONFIG(tooltip)
-        self.pushButton_export_patterns.setToolTip(QCoreApplication.translate("widget_dmd_stim", u"Export sequence with axis metadata for offline analysis", None))
-#endif // QT_CONFIG(tooltip)
         self.label_patterns.setText(QCoreApplication.translate("widget_dmd_stim", u"Patterns", None))
         self.groupBox_roi_properties.setTitle(QCoreApplication.translate("widget_dmd_stim", u"ROI properties", None))
         self.label_roi_placeholder.setText(QCoreApplication.translate("widget_dmd_stim", u"Select an ROI to edit its properties.", None))
@@ -535,4 +523,3 @@ class Ui_widget_dmd_stim(object):
         self.pushButton_change_folder.setText("")
         self.pushButton_refresh_image.setText("")
     # retranslateUi
-

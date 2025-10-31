@@ -487,7 +487,7 @@ class StimDMDWidget(QWidget):
     def model(self) -> PatternSequence:
         if self._calibration is None:
             raise RuntimeError(
-                "A DMD calibration must be available before exporting patterns."
+                "A DMD calibration must be available before saving pattern sequences."
             )
         patterns: list[list[np.ndarray]] = []
         descriptions: list[str] = []
@@ -659,7 +659,7 @@ class StimDMDWidget(QWidget):
             except Exception as exc:  # noqa: BLE001
                 QMessageBox.critical(
                     self,
-                    "Pattern export failed",
+                    "Pattern sequence unavailable",
                     str(exc),
                 )
                 return
@@ -727,7 +727,7 @@ class StimDMDWidget(QWidget):
         except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(
                 self,
-                "Pattern export failed",
+                "Pattern sequence unavailable",
                 str(exc),
             )
             return
@@ -821,7 +821,6 @@ class StimDMDWidget(QWidget):
         self.ui.pushButton_load_patterns.clicked.connect(self._load_patterns_file)
         self.ui.pushButton_save_patterns.clicked.connect(self._save_file)
         self.ui.pushButton_save_patterns_as.clicked.connect(self._save_file_as)
-        self.ui.pushButton_export_patterns.clicked.connect(self._export_patterns_for_analysis)
         self.ui.pushButton_cycle_patterns.clicked.connect(self._cycle_patterns)
         self.ui.pushButton_calibrate_dmd.clicked.connect(self._calibrate_dmd)
         self.ui.pushButton_reset_image_view.clicked.connect(self._reset_image_view)
@@ -2368,36 +2367,13 @@ class StimDMDWidget(QWidget):
         if saved_path:
             self.ui.lineEdit_file_path.setText(saved_path)
 
-    def _export_patterns_for_analysis(self) -> None:
-        model = self._collect_model()
-        if model is None:
-            return
-        current_path = self.ui.lineEdit_file_path.text().strip()
-        target_path = self._prompt_save_path("Export pattern sequence", current_path)
-        if not target_path:
-            return
-        saved_path = self._write_pattern_sequence(target_path, model, silent=True)
-        if not saved_path:
-            return
-        try:
-            self._write_analysis_metadata(saved_path, model)
-        except Exception as exc:  # noqa: BLE001
-            QMessageBox.warning(
-                self,
-                "Export incomplete",
-                "Pattern sequence saved, but analysis metadata could not be written.\n"
-                f"Reason: {exc}",
-            )
-            return
-        print(f"Exported PatternSequence with analysis metadata to {saved_path}")
-
     def _collect_model(self) -> PatternSequence | None:
         try:
             return self.model
         except RuntimeError as exc:
             QMessageBox.warning(self, "Calibration required", str(exc))
         except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(self, "Pattern export failed", str(exc))
+            QMessageBox.critical(self, "Pattern sequence unavailable", str(exc))
         return None
 
     def _prompt_save_path(self, title: str, initial_path: str) -> str:
@@ -2437,8 +2413,22 @@ class StimDMDWidget(QWidget):
         except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(self, "Save failed", str(exc))
             return None
+        metadata_error: Exception | None = None
+        try:
+            self._write_analysis_metadata(target, model)
+        except Exception as exc:  # noqa: BLE001
+            metadata_error = exc
+            QMessageBox.warning(
+                self,
+                "Pattern analysis incomplete",
+                "Pattern sequence saved, but analysis metadata could not be written.\n"
+                f"Reason: {exc}",
+            )
         if not silent:
-            print(f"Saved PatternSequence to {target}")
+            if metadata_error is not None:
+                print(f"Saved PatternSequence to {target} (analysis metadata missing)")
+            else:
+                print(f"Saved PatternSequence with analysis metadata to {target}")
         return target
 
     def _write_analysis_metadata(

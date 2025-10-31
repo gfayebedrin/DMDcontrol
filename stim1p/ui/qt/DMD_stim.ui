@@ -165,19 +165,6 @@
             </property>
            </widget>
           </item>
-          <item>
-           <widget class="QPushButton" name="pushButton_export_patterns">
-            <property name="text">
-             <string>Export for analysis</string>
-            </property>
-            <property name="icon">
-             <iconset theme="QIcon::ThemeIcon::DocumentSend"/>
-            </property>
-            <property name="toolTip">
-             <string>Export sequence with axis metadata for offline analysis</string>
-            </property>
-           </widget>
-          </item>
          </layout>
         </item>
         <item>
